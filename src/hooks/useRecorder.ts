@@ -10,11 +10,15 @@ export interface Recording {
   thumbnail?: string;
 }
 
+type RecordingMode = 'camera' | 'screen' | null;
+
 interface UseRecorderReturn {
   isRecording: boolean;
   isPaused: boolean;
   duration: number;
-  startRecording: (cameraStream: MediaStream) => Promise<void>;
+  recordingMode: RecordingMode;
+  startCameraRecording: (cameraStream: MediaStream) => Promise<void>;
+  startScreenRecording: (cameraStream: MediaStream) => Promise<void>;
   stopRecording: () => Promise<Recording | null>;
   pauseRecording: () => void;
   resumeRecording: () => void;
@@ -24,18 +28,56 @@ export function useRecorder(): UseRecorderReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [duration, setDuration] = useState(0);
+  const [recordingMode, setRecordingMode] = useState<RecordingMode>(null);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  // In the browser, setInterval returns a number (not NodeJS.Timeout)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const combinedStreamRef = useRef<MediaStream | null>(null);
-
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  const startRecording = useCallback(async (cameraStream: MediaStream) => {
+  // Camera-only recording (simple, no screen share)
+  const startCameraRecording = useCallback(async (cameraStream: MediaStream) => {
+    try {
+      chunksRef.current = [];
+      
+      // Determine supported MIME type
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : MediaRecorder.isTypeSupported('video/webm')
+        ? 'video/webm'
+        : 'video/mp4';
+      
+      const mediaRecorder = new MediaRecorder(cameraStream, { mimeType });
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start(1000);
+      
+      setIsRecording(true);
+      setIsPaused(false);
+      setDuration(0);
+      setRecordingMode('camera');
+      startTimeRef.current = Date.now();
+
+      timerRef.current = setInterval(() => {
+        setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to start camera recording:', err);
+      throw err;
+    }
+  }, []);
+
+  // Screen recording for full reaction videos (face + YouTube + audio)
+  const startScreenRecording = useCallback(async (cameraStream: MediaStream) => {
     try {
       chunksRef.current = [];
       
@@ -114,13 +156,14 @@ export function useRecorder(): UseRecorderReturn {
       setIsRecording(true);
       setIsPaused(false);
       setDuration(0);
+      setRecordingMode('screen');
       startTimeRef.current = Date.now();
 
       timerRef.current = setInterval(() => {
         setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
       }, 1000);
     } catch (err) {
-      console.error('Failed to start recording:', err);
+      console.error('Failed to start screen recording:', err);
       throw err;
     }
   }, []);
@@ -168,6 +211,7 @@ export function useRecorder(): UseRecorderReturn {
 
         setIsRecording(false);
         setIsPaused(false);
+        setRecordingMode(null);
         resolve(recording);
       };
 
@@ -176,6 +220,7 @@ export function useRecorder(): UseRecorderReturn {
       } else {
         setIsRecording(false);
         setIsPaused(false);
+        setRecordingMode(null);
         resolve(null);
       }
     });
@@ -206,7 +251,9 @@ export function useRecorder(): UseRecorderReturn {
     isRecording,
     isPaused,
     duration,
-    startRecording,
+    recordingMode,
+    startCameraRecording,
+    startScreenRecording,
     stopRecording,
     pauseRecording,
     resumeRecording,
