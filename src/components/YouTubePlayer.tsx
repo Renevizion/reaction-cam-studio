@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Play, Loader2 } from 'lucide-react';
 
@@ -11,6 +11,31 @@ interface YouTubePlayerProps {
 export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, videoId, className }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [thumbSrc, setThumbSrc] = useState<string>('');
+  const [thumbLoading, setThumbLoading] = useState(false);
+
+  const thumbCandidates = useMemo(() => {
+    if (!videoId) return null;
+    // Prefer i.ytimg.com (fast + reliable). maxres may 404, so we fallback.
+    return {
+      max: `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
+      hq: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+    };
+  }, [videoId]);
+
+  // Reset local UI state whenever the user pastes a new video.
+  useEffect(() => {
+    setIsPlaying(false);
+    setIsLoading(false);
+
+    if (thumbCandidates) {
+      setThumbSrc(thumbCandidates.max);
+      setThumbLoading(true);
+    } else {
+      setThumbSrc('');
+      setThumbLoading(false);
+    }
+  }, [thumbCandidates]);
 
   if (!embedUrl || !videoId) {
     return (
@@ -35,32 +60,43 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, videoId,
 
   // Show thumbnail with play button until user clicks
   if (!isPlaying) {
-    const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-    const fallbackThumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-
     return (
       <motion.div
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
-        className={`relative overflow-hidden rounded-lg bg-black cursor-pointer group ${className}`}
+        className={`relative overflow-hidden rounded-lg bg-secondary cursor-pointer group ${className}`}
         onClick={() => {
           setIsLoading(true);
           setIsPlaying(true);
         }}
       >
-        {/* YouTube Thumbnail */}
-        <img
-          src={thumbnailUrl}
-          alt="Video thumbnail"
-          className="absolute inset-0 w-full h-full object-cover"
-          onError={(e) => {
-            // Fallback to lower quality thumbnail if maxres doesn't exist
-            (e.target as HTMLImageElement).src = fallbackThumbnail;
-          }}
-        />
+        {/* Thumbnail (or a non-blank loading state) */}
+        {thumbSrc ? (
+          <img
+            src={thumbSrc}
+            alt="YouTube video thumbnail"
+            loading="lazy"
+            className="absolute inset-0 w-full h-full object-cover"
+            onLoad={() => setThumbLoading(false)}
+            onError={() => {
+              // Fallback if maxres isn't available
+              if (thumbCandidates && thumbSrc === thumbCandidates.max) {
+                setThumbSrc(thumbCandidates.hq);
+              } else {
+                setThumbLoading(false);
+              }
+            }}
+          />
+        ) : null}
+
+        {thumbLoading && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          </div>
+        )}
         
         {/* Dark overlay on hover */}
-        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors" />
+        <div className="absolute inset-0 bg-background/20 group-hover:bg-background/30 transition-colors" />
         
         {/* Play button */}
         <div className="absolute inset-0 flex items-center justify-center">
@@ -75,7 +111,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, videoId,
 
         {/* Click to play hint */}
         <div className="absolute bottom-4 left-4 right-4 text-center">
-          <span className="px-3 py-1 rounded-full bg-black/60 text-white text-sm">
+          <span className="px-3 py-1 rounded-full bg-background/70 text-foreground text-sm">
             Click to play video
           </span>
         </div>
@@ -87,7 +123,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, videoId,
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
-      className={`relative overflow-hidden rounded-lg bg-black ${className}`}
+      className={`relative overflow-hidden rounded-lg bg-secondary ${className}`}
     >
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-secondary z-10">
