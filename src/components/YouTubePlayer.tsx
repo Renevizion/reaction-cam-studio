@@ -39,7 +39,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, videoId,
 
   if (!embedUrl || !videoId) {
     return (
-      <div className={`flex items-center justify-center bg-secondary rounded-lg ${className}`}>
+      <div className={`flex items-center justify-center bg-secondary rounded-lg overflow-hidden ${className}`}>
         <div className="text-center p-8">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
             <svg
@@ -64,7 +64,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, videoId,
       <motion.div
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
-        className={`relative overflow-hidden rounded-lg bg-secondary cursor-pointer group ${className}`}
+        className={`overflow-hidden rounded-lg bg-secondary cursor-pointer group ${className}`}
         onClick={() => {
           setIsLoading(true);
           setIsPlaying(true);
@@ -123,7 +123,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, videoId,
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
-      className={`relative overflow-hidden rounded-lg bg-secondary ${className}`}
+      className={`overflow-hidden rounded-lg bg-secondary ${className}`}
     >
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-secondary z-10">
