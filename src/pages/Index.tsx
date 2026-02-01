@@ -206,26 +206,11 @@ const Index = () => {
       <div className="flex-1 flex flex-col p-4 pt-2 pb-0 min-h-0">
         {viewMode === 'pip' ? (
           // Picture-in-Picture mode - video container with camera overlay INSIDE
-          <div className="flex-1 relative overflow-hidden rounded-2xl mb-28">
-            <YouTubePlayer 
-              embedUrl={embedUrl}
-              videoId={videoId}
-              className="absolute inset-0"
-            />
-            <SocialOverlay settings={overlays.settings} />
-            <LogoOverlay config={logo.config} />
-            <AnimatePresence>
-              <CameraOverlay
-                videoRef={videoRef}
-                isActive={isActive}
-                onSwitchCamera={switchCamera}
-              />
-            </AnimatePresence>
-          </div>
-        ) : (
-          // Split view mode
-          <div className="flex-1 flex flex-col gap-3 mb-28 min-h-0">
-            <div className="flex-1 min-h-0 relative overflow-hidden rounded-2xl">
+          <div className="flex-1 flex items-center justify-center mb-28">
+            <div 
+              className="relative overflow-hidden rounded-2xl bg-secondary w-full h-full max-w-full max-h-full"
+              style={{ aspectRatio: currentConfig.ratio }}
+            >
               <YouTubePlayer 
                 embedUrl={embedUrl}
                 videoId={videoId}
@@ -233,6 +218,31 @@ const Index = () => {
               />
               <SocialOverlay settings={overlays.settings} />
               <LogoOverlay config={logo.config} />
+              <AnimatePresence>
+                <CameraOverlay
+                  videoRef={videoRef}
+                  isActive={isActive}
+                  onSwitchCamera={switchCamera}
+                />
+              </AnimatePresence>
+            </div>
+          </div>
+        ) : (
+          // Split view mode
+          <div className="flex-1 flex flex-col gap-3 mb-28 min-h-0">
+            <div className="flex-1 min-h-0 flex items-center justify-center">
+              <div 
+                className="relative overflow-hidden rounded-2xl bg-secondary w-full h-full max-w-full max-h-full"
+                style={{ aspectRatio: currentConfig.ratio }}
+              >
+                <YouTubePlayer 
+                  embedUrl={embedUrl}
+                  videoId={videoId}
+                  className="absolute inset-0"
+                />
+                <SocialOverlay settings={overlays.settings} />
+                <LogoOverlay config={logo.config} />
+              </div>
             </div>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
