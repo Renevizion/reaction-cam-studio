@@ -141,7 +141,7 @@ const Index = () => {
             <YouTubePlayer 
               embedUrl={embedUrl}
               videoId={videoId}
-              className="absolute inset-4 bottom-32"
+              className="absolute inset-4 bottom-32 z-10"
             />
             <AnimatePresence>
               <CameraOverlay

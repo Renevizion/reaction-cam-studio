@@ -42,19 +42,17 @@ export const UrlInput: React.FC<UrlInputProps> = ({ onSubmit, error }) => {
         <input
           type="url"
           value={url}
-          onChange={(e) => {
-            const newUrl = e.target.value;
-            setUrl(newUrl);
-            // Auto-load YouTube when pasting a valid URL
-            if (newUrl.includes('youtube.com') || newUrl.includes('youtu.be')) {
-              onSubmit(newUrl.trim());
-            }
-          }}
+          onChange={(e) => setUrl(e.target.value)}
           onPaste={(e) => {
-            // Handle paste immediately
             const pastedText = e.clipboardData.getData('text');
+            if (!pastedText) return;
+
+            // Prevent double-trigger (paste + change) and submit once.
+            e.preventDefault();
+            setUrl(pastedText);
+
             if (pastedText.includes('youtube.com') || pastedText.includes('youtu.be')) {
-              setTimeout(() => onSubmit(pastedText.trim()), 0);
+              onSubmit(pastedText.trim());
             }
           }}
           onFocus={() => setIsFocused(true)}
