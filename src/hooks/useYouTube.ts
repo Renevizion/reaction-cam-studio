@@ -33,7 +33,7 @@ export function useYouTube(): UseYouTubeReturn {
 
   const embedUrl = useMemo(() => {
     if (!videoId) return null;
-    return `https://www.youtube.com/embed/${videoId}?enablejsapi=1&rel=0&modestbranding=1`;
+    return `https://www.youtube.com/embed/${videoId}?autoplay=0&rel=0&modestbranding=1&playsinline=1`;
   }, [videoId]);
 
   const setVideoUrl = (url: string) => {

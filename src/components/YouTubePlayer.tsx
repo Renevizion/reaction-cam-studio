@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { Loader2 } from 'lucide-react';
 
 interface YouTubePlayerProps {
   embedUrl: string | null;
@@ -7,6 +8,15 @@ interface YouTubePlayerProps {
 }
 
 export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, className }) => {
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Reset loading state when URL changes
+  useEffect(() => {
+    if (embedUrl) {
+      setIsLoading(true);
+    }
+  }, [embedUrl]);
+
   if (!embedUrl) {
     return (
       <div className={`flex items-center justify-center bg-secondary rounded-lg ${className}`}>
@@ -34,12 +44,19 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, classNam
       animate={{ opacity: 1, scale: 1 }}
       className={`relative overflow-hidden rounded-lg bg-black ${className}`}
     >
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-secondary z-10">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        </div>
+      )}
       <iframe
+        key={embedUrl}
         src={embedUrl}
         className="absolute inset-0 w-full h-full"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
         allowFullScreen
         title="YouTube video"
+        onLoad={() => setIsLoading(false)}
       />
     </motion.div>
   );
