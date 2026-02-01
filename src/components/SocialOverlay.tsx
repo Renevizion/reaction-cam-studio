@@ -66,7 +66,7 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ settings }) => {
     <motion.div
       initial={{ opacity: 0, y: settings.position === 'top' ? -20 : 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`absolute left-0 right-0 z-30 flex justify-center px-4 py-2 ${
+      className={`absolute left-0 right-0 z-40 flex justify-center px-4 py-2 pointer-events-none ${
         settings.position === 'top' ? 'top-0' : 'bottom-0'
       }`}
       style={{
