@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Circle, Square, Pause, Play, Video, VideoOff, Monitor, ChevronUp } from 'lucide-react';
+import { Circle, Square, Pause, Play, Video, VideoOff, Monitor, Film } from 'lucide-react';
 
 interface RecordingControlsProps {
   isRecording: boolean;
   isPaused: boolean;
   isCameraActive: boolean;
   duration: number;
-  recordingMode: 'camera' | 'screen' | null;
-  onStartCameraRecording: () => void;
+  recordingMode: 'video' | 'screen' | null;
+  onStartVideoRecording: () => void;
   onStartScreenRecording: () => void;
   onStopRecording: () => void;
   onPauseRecording: () => void;
@@ -28,7 +28,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   isCameraActive,
   duration,
   recordingMode,
-  onStartCameraRecording,
+  onStartVideoRecording,
   onStartScreenRecording,
   onStopRecording,
   onPauseRecording,
@@ -61,20 +61,20 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             className="mx-4 mb-2 p-3 glass-strong rounded-2xl"
           >
             <p className="text-center text-sm text-muted-foreground mb-3">
-              Choose recording mode
+              Choose reaction mode
             </p>
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={() => {
                   setShowOptions(false);
-                  onStartCameraRecording();
+                  onStartVideoRecording();
                 }}
                 className="flex flex-col items-center gap-2 p-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors"
               >
-                <Video className="w-6 h-6 text-primary" />
-                <span className="text-sm font-medium text-foreground">Camera Only</span>
+                <Film className="w-6 h-6 text-primary" />
+                <span className="text-sm font-medium text-foreground">Camera + Video</span>
                 <span className="text-xs text-muted-foreground text-center">
-                  Records just your face
+                  React to YouTube link
                 </span>
               </button>
               <button
@@ -85,9 +85,9 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                 className="flex flex-col items-center gap-2 p-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors"
               >
                 <Monitor className="w-6 h-6 text-primary" />
-                <span className="text-sm font-medium text-foreground">Reaction Video</span>
+                <span className="text-sm font-medium text-foreground">Camera + Screen</span>
                 <span className="text-xs text-muted-foreground text-center">
-                  Face + YouTube + Audio
+                  React to any screen
                 </span>
               </button>
             </div>
@@ -115,7 +115,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             </span>
             {recordingMode && (
               <span className="px-2 py-0.5 rounded-full bg-secondary text-xs text-muted-foreground">
-                {recordingMode === 'camera' ? 'Camera' : 'Screen'}
+                {recordingMode === 'video' ? 'Video' : 'Screen'}
               </span>
             )}
             {isPaused && (

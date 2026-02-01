@@ -22,7 +22,7 @@ const Index = () => {
   
   const { embedUrl, videoId, setVideoUrl, isValidUrl, error: urlError } = useYouTube();
   const { stream, isActive, startCamera, stopCamera, switchCamera, videoRef, error: cameraError } = useCamera();
-  const { isRecording, isPaused, duration, recordingMode, startCameraRecording, startScreenRecording, stopRecording, pauseRecording, resumeRecording } = useRecorder();
+  const { isRecording, isPaused, duration, recordingMode, startVideoRecording, startScreenRecording, stopRecording, pauseRecording, resumeRecording } = useRecorder();
   const { recordings, addRecording, deleteRecording, downloadRecording } = useRecordings();
 
   const handleToggleCamera = useCallback(async () => {
@@ -33,18 +33,18 @@ const Index = () => {
     }
   }, [isActive, startCamera, stopCamera]);
 
-  const handleStartCameraRecording = useCallback(async () => {
+  const handleStartVideoRecording = useCallback(async () => {
     if (!stream) {
       toast.error('Please enable your camera first');
       return;
     }
     try {
-      await startCameraRecording(stream);
-      toast.success('Recording started!');
+      await startVideoRecording(stream);
+      toast.success('Recording started - select THIS TAB and enable audio!');
     } catch (err) {
-      toast.error('Failed to start recording');
+      toast.error('Screen sharing was cancelled or denied');
     }
-  }, [stream, startCameraRecording]);
+  }, [stream, startVideoRecording]);
 
   const handleStartScreenRecording = useCallback(async () => {
     if (!stream) {
@@ -53,7 +53,7 @@ const Index = () => {
     }
     try {
       await startScreenRecording(stream);
-      toast.success('Recording started - share this tab to capture your reaction!');
+      toast.success('Recording started - share your screen!');
     } catch (err) {
       toast.error('Screen sharing was cancelled or denied');
     }
@@ -192,7 +192,7 @@ const Index = () => {
           isCameraActive={isActive}
           duration={duration}
           recordingMode={recordingMode}
-          onStartCameraRecording={handleStartCameraRecording}
+          onStartVideoRecording={handleStartVideoRecording}
           onStartScreenRecording={handleStartScreenRecording}
           onStopRecording={handleStopRecording}
           onPauseRecording={pauseRecording}

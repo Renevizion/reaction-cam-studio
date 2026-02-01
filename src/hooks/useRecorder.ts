@@ -10,14 +10,14 @@ export interface Recording {
   thumbnail?: string;
 }
 
-type RecordingMode = 'camera' | 'screen' | null;
+type RecordingMode = 'video' | 'screen' | null;
 
 interface UseRecorderReturn {
   isRecording: boolean;
   isPaused: boolean;
   duration: number;
   recordingMode: RecordingMode;
-  startCameraRecording: (cameraStream: MediaStream) => Promise<void>;
+  startVideoRecording: (cameraStream: MediaStream) => Promise<void>;
   startScreenRecording: (cameraStream: MediaStream) => Promise<void>;
   stopRecording: () => Promise<Recording | null>;
   pauseRecording: () => void;
@@ -38,10 +38,57 @@ export function useRecorder(): UseRecorderReturn {
   const combinedStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  // Camera-only recording (simple, no screen share)
-  const startCameraRecording = useCallback(async (cameraStream: MediaStream) => {
+  // Camera + Video recording (captures this tab with YouTube + camera overlay)
+  const startVideoRecording = useCallback(async (cameraStream: MediaStream) => {
     try {
       chunksRef.current = [];
+      
+      // Capture THIS TAB which includes YouTube video AND camera overlay
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: 'browser',
+        },
+        audio: true, // Capture system audio (YouTube audio)
+      });
+      
+      screenStreamRef.current = screenStream;
+      
+      // Combine screen video with camera audio (mic)
+      const audioTracks = cameraStream.getAudioTracks();
+      const screenAudioTracks = screenStream.getAudioTracks();
+      const videoTracks = screenStream.getVideoTracks();
+      
+      // Create AudioContext to mix both audio sources
+      if (audioContextRef.current) {
+        try {
+          await audioContextRef.current.close();
+        } catch {
+          // ignore
+        }
+      }
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const destination = audioContext.createMediaStreamDestination();
+      
+      // Add microphone audio
+      if (audioTracks.length > 0) {
+        const micSource = audioContext.createMediaStreamSource(new MediaStream(audioTracks));
+        micSource.connect(destination);
+      }
+      
+      // Add system/YouTube audio
+      if (screenAudioTracks.length > 0) {
+        const systemSource = audioContext.createMediaStreamSource(new MediaStream(screenAudioTracks));
+        systemSource.connect(destination);
+      }
+      
+      // Combine video from screen and mixed audio
+      const combinedStream = new MediaStream([
+        ...videoTracks,
+        ...destination.stream.getAudioTracks(),
+      ]);
+      
+      combinedStreamRef.current = combinedStream;
       
       // Determine supported MIME type
       const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
@@ -50,11 +97,18 @@ export function useRecorder(): UseRecorderReturn {
         ? 'video/webm'
         : 'video/mp4';
       
-      const mediaRecorder = new MediaRecorder(cameraStream, { mimeType });
+      const mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
 
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
           chunksRef.current.push(e.data);
+        }
+      };
+
+      // Handle when user stops screen sharing via browser UI
+      screenStream.getVideoTracks()[0].onended = () => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+          mediaRecorderRef.current.stop();
         }
       };
 
@@ -64,14 +118,14 @@ export function useRecorder(): UseRecorderReturn {
       setIsRecording(true);
       setIsPaused(false);
       setDuration(0);
-      setRecordingMode('camera');
+      setRecordingMode('video');
       startTimeRef.current = Date.now();
 
       timerRef.current = setInterval(() => {
         setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
       }, 1000);
     } catch (err) {
-      console.error('Failed to start camera recording:', err);
+      console.error('Failed to start video recording:', err);
       throw err;
     }
   }, []);
@@ -252,7 +306,7 @@ export function useRecorder(): UseRecorderReturn {
     isPaused,
     duration,
     recordingMode,
-    startCameraRecording,
+    startVideoRecording,
     startScreenRecording,
     stopRecording,
     pauseRecording,
