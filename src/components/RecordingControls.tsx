@@ -61,7 +61,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             className="mx-4 mb-2 p-3 glass-strong rounded-2xl"
           >
             <p className="text-center text-sm text-muted-foreground mb-3">
-              Choose reaction mode
+              Both modes capture your face + content together
             </p>
             <div className="grid grid-cols-2 gap-3">
               <button
@@ -74,7 +74,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                 <Film className="w-6 h-6 text-primary" />
                 <span className="text-sm font-medium text-foreground">Camera + Video</span>
                 <span className="text-xs text-muted-foreground text-center">
-                  React to YouTube link
+                  This tab (auto-select)
                 </span>
               </button>
               <button
@@ -87,7 +87,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                 <Monitor className="w-6 h-6 text-primary" />
                 <span className="text-sm font-medium text-foreground">Camera + Screen</span>
                 <span className="text-xs text-muted-foreground text-center">
-                  React to any screen
+                  Any window/screen
                 </span>
               </button>
             </div>
