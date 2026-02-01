@@ -31,10 +31,6 @@ export function useCamera(): UseCameraReturn {
 
       setStream(mediaStream);
       setIsActive(true);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
     } catch (err) {
       setError('Camera access denied. Please allow camera permissions.');
       console.error('Camera error:', err);
@@ -50,16 +46,46 @@ export function useCamera(): UseCameraReturn {
   }, [stream]);
 
   const switchCamera = useCallback(async () => {
-    stopCamera();
-    setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
-  }, [stopCamera]);
-
-  useEffect(() => {
-    if (facingMode && !isActive && stream === null) {
-      // Don't auto-start, let user control
+    // Stop current stream
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
     }
-  }, [facingMode]);
+    // Toggle facing mode and restart
+    const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(newFacingMode);
+    
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: newFacingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: true,
+      });
+      setStream(mediaStream);
+    } catch (err) {
+      setError('Failed to switch camera');
+      console.error('Camera switch error:', err);
+    }
+  }, [stream, facingMode]);
 
+  // Sync stream to video element whenever either changes
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  // Also handle when video element mounts/changes
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video && stream) {
+      video.srcObject = stream;
+    }
+  });
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (stream) {
