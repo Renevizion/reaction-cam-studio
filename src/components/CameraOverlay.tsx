@@ -102,7 +102,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   return (
     <motion.div
       ref={containerRef}
-      className={`absolute camera-overlay ${isFullscreen ? 'inset-4 z-30' : 'z-20'}`}
+      className={`absolute camera-overlay ${isFullscreen ? 'inset-0 z-30' : 'z-20'}`}
       style={isFullscreen ? undefined : {
         left: position.x,
         top: position.y,
