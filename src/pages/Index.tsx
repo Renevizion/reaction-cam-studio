@@ -14,6 +14,7 @@ import { AspectRatioSelector } from '@/components/AspectRatioSelector';
 import { SoundEffectsBoard } from '@/components/SoundEffectsBoard';
 import { LogoUploader } from '@/components/LogoUploader';
 import { LogoOverlay } from '@/components/LogoOverlay';
+import { AudioLevelMeter } from '@/components/AudioLevelMeter';
 import { useCamera } from '@/hooks/useCamera';
 import { useRecorder, Recording } from '@/hooks/useRecorder';
 import { useRecordings } from '@/hooks/useRecordings';
@@ -256,6 +257,15 @@ const Index = () => {
             </motion.div>
           </div>
         )}
+
+        {/* Audio level meter */}
+        <AnimatePresence>
+          {isRecording && (
+            <div className="absolute bottom-32 left-4 z-30">
+              <AudioLevelMeter stream={stream} isRecording={isRecording} />
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* Recording controls */}
         <RecordingControls
