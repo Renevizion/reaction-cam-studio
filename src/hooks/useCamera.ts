@@ -1,3 +1,4 @@
+/* @refresh reset */
 import { useState, useRef, useCallback, useEffect } from 'react';
 
 interface UseCameraReturn {
@@ -43,6 +44,11 @@ export function useCamera(): UseCameraReturn {
       setStream(null);
       setIsActive(false);
     }
+
+    if (videoRef.current) {
+      // Ensure the element releases the stream immediately
+      videoRef.current.srcObject = null;
+    }
   }, [stream]);
 
   const switchCamera = useCallback(async () => {
@@ -55,6 +61,7 @@ export function useCamera(): UseCameraReturn {
     setFacingMode(newFacingMode);
     
     try {
+      setError(null);
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: newFacingMode,
@@ -64,26 +71,43 @@ export function useCamera(): UseCameraReturn {
         audio: true,
       });
       setStream(mediaStream);
+      setIsActive(true);
     } catch (err) {
       setError('Failed to switch camera');
       console.error('Camera switch error:', err);
     }
   }, [stream, facingMode]);
 
-  // Sync stream to video element whenever either changes
-  useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
-  }, [stream]);
-
-  // Also handle when video element mounts/changes
+  // Sync stream to the video element + force play (fixes "black" preview in some browsers)
   useEffect(() => {
     const video = videoRef.current;
-    if (video && stream) {
+    if (!video) return;
+
+    if (!stream) {
+      video.srcObject = null;
+      return;
+    }
+
+    if (video.srcObject !== stream) {
       video.srcObject = stream;
     }
-  });
+
+    const tryPlay = async () => {
+      try {
+        await video.play();
+      } catch {
+        // Autoplay policies vary; user gesture should allow this.
+      }
+    };
+
+    if (video.readyState >= 2) {
+      void tryPlay();
+    } else {
+      const onLoaded = () => void tryPlay();
+      video.addEventListener('loadedmetadata', onLoaded, { once: true });
+      return () => video.removeEventListener('loadedmetadata', onLoaded);
+    }
+  }, [stream]);
 
   // Cleanup on unmount
   useEffect(() => {
