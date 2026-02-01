@@ -13,7 +13,7 @@ interface UseRecorderReturn {
   isRecording: boolean;
   isPaused: boolean;
   duration: number;
-  startRecording: (stream: MediaStream) => void;
+  startRecording: (cameraStream: MediaStream) => Promise<void>;
   stopRecording: () => Promise<Recording | null>;
   pauseRecording: () => void;
   resumeRecording: () => void;
@@ -28,31 +28,89 @@ export function useRecorder(): UseRecorderReturn {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const combinedStreamRef = useRef<MediaStream | null>(null);
 
-  const startRecording = useCallback((stream: MediaStream) => {
-    chunksRef.current = [];
-    
-    const mediaRecorder = new MediaRecorder(stream, {
-      mimeType: 'video/webm;codecs=vp9',
-    });
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        chunksRef.current.push(e.data);
+  const startRecording = useCallback(async (cameraStream: MediaStream) => {
+    try {
+      chunksRef.current = [];
+      
+      // Capture the screen/tab which includes YouTube video AND camera overlay
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: 'browser',
+        },
+        audio: true, // Capture system audio (YouTube audio)
+      });
+      
+      screenStreamRef.current = screenStream;
+      
+      // Combine screen video with camera audio (mic)
+      const audioTracks = cameraStream.getAudioTracks();
+      const screenAudioTracks = screenStream.getAudioTracks();
+      const videoTracks = screenStream.getVideoTracks();
+      
+      // Create AudioContext to mix both audio sources
+      const audioContext = new AudioContext();
+      const destination = audioContext.createMediaStreamDestination();
+      
+      // Add microphone audio
+      if (audioTracks.length > 0) {
+        const micSource = audioContext.createMediaStreamSource(new MediaStream(audioTracks));
+        micSource.connect(destination);
       }
-    };
+      
+      // Add system/YouTube audio
+      if (screenAudioTracks.length > 0) {
+        const systemSource = audioContext.createMediaStreamSource(new MediaStream(screenAudioTracks));
+        systemSource.connect(destination);
+      }
+      
+      // Combine video from screen and mixed audio
+      const combinedStream = new MediaStream([
+        ...videoTracks,
+        ...destination.stream.getAudioTracks(),
+      ]);
+      
+      combinedStreamRef.current = combinedStream;
+      
+      // Determine supported MIME type
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : MediaRecorder.isTypeSupported('video/webm')
+        ? 'video/webm'
+        : 'video/mp4';
+      
+      const mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
 
-    mediaRecorderRef.current = mediaRecorder;
-    mediaRecorder.start(1000);
-    
-    setIsRecording(true);
-    setIsPaused(false);
-    setDuration(0);
-    startTimeRef.current = Date.now();
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
 
-    timerRef.current = setInterval(() => {
-      setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
-    }, 1000);
+      // Handle when user stops screen sharing via browser UI
+      screenStream.getVideoTracks()[0].onended = () => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+          mediaRecorderRef.current.stop();
+        }
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start(1000);
+      
+      setIsRecording(true);
+      setIsPaused(false);
+      setDuration(0);
+      startTimeRef.current = Date.now();
+
+      timerRef.current = setInterval(() => {
+        setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to start recording:', err);
+      throw err;
+    }
   }, []);
 
   const stopRecording = useCallback(async (): Promise<Recording | null> => {
@@ -67,7 +125,19 @@ export function useRecorder(): UseRecorderReturn {
         timerRef.current = null;
       }
 
+      const currentDuration = duration;
+
       mediaRecorderRef.current.onstop = () => {
+        // Stop all screen capture tracks
+        if (screenStreamRef.current) {
+          screenStreamRef.current.getTracks().forEach(track => track.stop());
+          screenStreamRef.current = null;
+        }
+        if (combinedStreamRef.current) {
+          combinedStreamRef.current.getTracks().forEach(track => track.stop());
+          combinedStreamRef.current = null;
+        }
+
         const blob = new Blob(chunksRef.current, { type: 'video/webm' });
         const url = URL.createObjectURL(blob);
         
@@ -75,7 +145,7 @@ export function useRecorder(): UseRecorderReturn {
           id: `rec-${Date.now()}`,
           blob,
           url,
-          duration,
+          duration: currentDuration,
           createdAt: new Date(),
         };
 
@@ -84,7 +154,13 @@ export function useRecorder(): UseRecorderReturn {
         resolve(recording);
       };
 
-      mediaRecorderRef.current.stop();
+      if (mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      } else {
+        setIsRecording(false);
+        setIsPaused(false);
+        resolve(null);
+      }
     });
   }, [duration]);
 
