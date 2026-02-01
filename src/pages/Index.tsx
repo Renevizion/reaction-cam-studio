@@ -20,7 +20,7 @@ const Index = () => {
   const [showGallery, setShowGallery] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
   
-  const { embedUrl, setVideoUrl, isValidUrl, error: urlError } = useYouTube();
+  const { embedUrl, videoId, setVideoUrl, isValidUrl, error: urlError } = useYouTube();
   const { stream, isActive, startCamera, stopCamera, switchCamera, videoRef, error: cameraError } = useCamera();
   const { isRecording, isPaused, duration, recordingMode, startCameraRecording, startScreenRecording, stopRecording, pauseRecording, resumeRecording } = useRecorder();
   const { recordings, addRecording, deleteRecording, downloadRecording } = useRecordings();
@@ -139,7 +139,8 @@ const Index = () => {
           // Picture-in-Picture mode
           <div className="relative h-full">
             <YouTubePlayer 
-              embedUrl={embedUrl} 
+              embedUrl={embedUrl}
+              videoId={videoId}
               className="absolute inset-4 bottom-32"
             />
             <AnimatePresence>
@@ -154,7 +155,8 @@ const Index = () => {
           // Split view mode
           <div className="h-full flex flex-col p-4 gap-4 pb-32">
             <YouTubePlayer 
-              embedUrl={embedUrl} 
+              embedUrl={embedUrl}
+              videoId={videoId}
               className="flex-1 min-h-0"
             />
             <motion.div
