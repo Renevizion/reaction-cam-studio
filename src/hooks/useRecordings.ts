@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Recording } from './useRecorder';
 
+// Storage key for future persistence
 const STORAGE_KEY = 'reaction-recordings';
 
 export function useRecordings() {
