@@ -1,23 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Loader2 } from 'lucide-react';
+import { Play, Loader2 } from 'lucide-react';
 
 interface YouTubePlayerProps {
   embedUrl: string | null;
+  videoId?: string | null;
   className?: string;
 }
 
-export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, className }) => {
-  const [isLoading, setIsLoading] = useState(true);
+export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, videoId, className }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Reset loading state when URL changes
-  useEffect(() => {
-    if (embedUrl) {
-      setIsLoading(true);
-    }
-  }, [embedUrl]);
-
-  if (!embedUrl) {
+  if (!embedUrl || !videoId) {
     return (
       <div className={`flex items-center justify-center bg-secondary rounded-lg ${className}`}>
         <div className="text-center p-8">
@@ -38,6 +33,56 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, classNam
     );
   }
 
+  // Show thumbnail with play button until user clicks
+  if (!isPlaying) {
+    const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+    const fallbackThumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.98 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className={`relative overflow-hidden rounded-lg bg-black cursor-pointer group ${className}`}
+        onClick={() => {
+          setIsLoading(true);
+          setIsPlaying(true);
+        }}
+      >
+        {/* YouTube Thumbnail */}
+        <img
+          src={thumbnailUrl}
+          alt="Video thumbnail"
+          className="absolute inset-0 w-full h-full object-cover"
+          onError={(e) => {
+            // Fallback to lower quality thumbnail if maxres doesn't exist
+            (e.target as HTMLImageElement).src = fallbackThumbnail;
+          }}
+        />
+        
+        {/* Dark overlay on hover */}
+        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors" />
+        
+        {/* Play button */}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <motion.div
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.95 }}
+            className="w-20 h-20 rounded-full bg-primary/90 flex items-center justify-center shadow-2xl"
+          >
+            <Play className="w-10 h-10 text-primary-foreground fill-current ml-1" />
+          </motion.div>
+        </div>
+
+        {/* Click to play hint */}
+        <div className="absolute bottom-4 left-4 right-4 text-center">
+          <span className="px-3 py-1 rounded-full bg-black/60 text-white text-sm">
+            Click to play video
+          </span>
+        </div>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
@@ -51,7 +96,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ embedUrl, classNam
       )}
       <iframe
         key={embedUrl}
-        src={embedUrl}
+        src={`${embedUrl}&autoplay=1`}
         className="absolute inset-0 w-full h-full"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
         allowFullScreen
