@@ -1,16 +1,19 @@
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FolderOpen, Layers, MonitorPlay } from 'lucide-react';
+import { FolderOpen, Layers, MonitorPlay, Sparkles } from 'lucide-react';
 import { YouTubePlayer } from '@/components/YouTubePlayer';
 import { CameraOverlay } from '@/components/CameraOverlay';
 import { RecordingControls } from '@/components/RecordingControls';
 import { RecordingsGallery } from '@/components/RecordingsGallery';
 import { VideoPlayerModal } from '@/components/VideoPlayerModal';
 import { UrlInput } from '@/components/UrlInput';
+import { SocialOverlay } from '@/components/SocialOverlay';
+import { OverlayEditor } from '@/components/OverlayEditor';
 import { useCamera } from '@/hooks/useCamera';
 import { useRecorder, Recording } from '@/hooks/useRecorder';
 import { useRecordings } from '@/hooks/useRecordings';
 import { useYouTube } from '@/hooks/useYouTube';
+import { useOverlays } from '@/hooks/useOverlays';
 import { toast } from 'sonner';
 
 type ViewMode = 'pip' | 'split';
@@ -18,12 +21,14 @@ type ViewMode = 'pip' | 'split';
 const Index = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('pip');
   const [showGallery, setShowGallery] = useState(false);
+  const [showOverlayEditor, setShowOverlayEditor] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
   
   const { embedUrl, videoId, setVideoUrl, isValidUrl, error: urlError } = useYouTube();
   const { stream, isActive, startCamera, stopCamera, switchCamera, videoRef, error: cameraError } = useCamera();
   const { isRecording, isPaused, duration, recordingMode, startVideoRecording, startScreenRecording, stopRecording, pauseRecording, resumeRecording } = useRecorder();
   const { recordings, addRecording, deleteRecording, downloadRecording } = useRecordings();
+  const overlays = useOverlays();
 
   const handleToggleCamera = useCallback(async () => {
     if (isActive) {
@@ -118,6 +123,18 @@ const Index = () => {
             </button>
           </div>
           
+          {/* Overlay editor button */}
+          <button
+            onClick={() => setShowOverlayEditor(true)}
+            className={`relative p-2 rounded-xl transition-colors ${
+              overlays.hasVisibleOverlays
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-secondary text-foreground'
+            }`}
+          >
+            <Sparkles className="w-5 h-5" />
+          </button>
+          
           {/* Gallery button */}
           <button
             onClick={() => setShowGallery(true)}
@@ -143,6 +160,7 @@ const Index = () => {
               videoId={videoId}
               className="absolute inset-0"
             />
+            <SocialOverlay settings={overlays.settings} />
             <AnimatePresence>
               <CameraOverlay
                 videoRef={videoRef}
@@ -160,6 +178,7 @@ const Index = () => {
                 videoId={videoId}
                 className="absolute inset-0"
               />
+              <SocialOverlay settings={overlays.settings} />
             </div>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -226,6 +245,18 @@ const Index = () => {
       <VideoPlayerModal
         recording={playingRecording}
         onClose={() => setPlayingRecording(null)}
+      />
+
+      {/* Overlay editor */}
+      <OverlayEditor
+        isOpen={showOverlayEditor}
+        settings={overlays.settings}
+        onClose={() => setShowOverlayEditor(false)}
+        onAddSocialLink={overlays.addSocialLink}
+        onUpdateSocialLink={overlays.updateSocialLink}
+        onRemoveSocialLink={overlays.removeSocialLink}
+        onSetPosition={overlays.setPosition}
+        onToggleBackground={overlays.toggleBackground}
       />
     </div>
   );
