@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FolderOpen, Layers, MonitorPlay, Sparkles } from 'lucide-react';
+import { FolderOpen, Layers, MonitorPlay, Sparkles, Ratio, Volume2, ImageIcon } from 'lucide-react';
 import { YouTubePlayer } from '@/components/YouTubePlayer';
 import { CameraOverlay } from '@/components/CameraOverlay';
 import { RecordingControls } from '@/components/RecordingControls';
@@ -9,11 +9,19 @@ import { VideoPlayerModal } from '@/components/VideoPlayerModal';
 import { UrlInput } from '@/components/UrlInput';
 import { SocialOverlay } from '@/components/SocialOverlay';
 import { OverlayEditor } from '@/components/OverlayEditor';
+import { CountdownOverlay } from '@/components/CountdownOverlay';
+import { AspectRatioSelector } from '@/components/AspectRatioSelector';
+import { SoundEffectsBoard } from '@/components/SoundEffectsBoard';
+import { LogoUploader } from '@/components/LogoUploader';
+import { LogoOverlay } from '@/components/LogoOverlay';
 import { useCamera } from '@/hooks/useCamera';
 import { useRecorder, Recording } from '@/hooks/useRecorder';
 import { useRecordings } from '@/hooks/useRecordings';
 import { useYouTube } from '@/hooks/useYouTube';
 import { useOverlays } from '@/hooks/useOverlays';
+import { useCountdown } from '@/hooks/useCountdown';
+import { useAspectRatio } from '@/hooks/useAspectRatio';
+import { useLogo } from '@/hooks/useLogo';
 import { toast } from 'sonner';
 
 type ViewMode = 'pip' | 'split';
@@ -22,6 +30,9 @@ const Index = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('pip');
   const [showGallery, setShowGallery] = useState(false);
   const [showOverlayEditor, setShowOverlayEditor] = useState(false);
+  const [showAspectRatio, setShowAspectRatio] = useState(false);
+  const [showSoundEffects, setShowSoundEffects] = useState(false);
+  const [showLogoUploader, setShowLogoUploader] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
   
   const { embedUrl, videoId, setVideoUrl, isValidUrl, error: urlError } = useYouTube();
@@ -29,6 +40,9 @@ const Index = () => {
   const { isRecording, isPaused, duration, recordingMode, startVideoRecording, startScreenRecording, stopRecording, pauseRecording, resumeRecording } = useRecorder();
   const { recordings, addRecording, deleteRecording, downloadRecording } = useRecordings();
   const overlays = useOverlays();
+  const { count, isCountingDown, startCountdown, cancelCountdown } = useCountdown(3);
+  const { aspectRatio, currentConfig, changeAspectRatio, presets } = useAspectRatio();
+  const logo = useLogo();
 
   const handleToggleCamera = useCallback(async () => {
     if (isActive) {
@@ -43,26 +57,30 @@ const Index = () => {
       toast.error('Please enable your camera first');
       return;
     }
-    try {
-      await startVideoRecording(stream);
-      toast.success('Recording! Make sure to check "Share tab audio"');
-    } catch (err) {
-      toast.error('Recording cancelled');
-    }
-  }, [stream, startVideoRecording]);
+    startCountdown(async () => {
+      try {
+        await startVideoRecording(stream);
+        toast.success('Recording! Make sure to check "Share tab audio"');
+      } catch (err) {
+        toast.error('Recording cancelled');
+      }
+    });
+  }, [stream, startVideoRecording, startCountdown]);
 
   const handleStartScreenRecording = useCallback(async () => {
     if (!stream) {
       toast.error('Please enable your camera first');
       return;
     }
-    try {
-      await startScreenRecording(stream);
-      toast.success('Recording! Share audio if you want sound');
-    } catch (err) {
-      toast.error('Recording cancelled');
-    }
-  }, [stream, startScreenRecording]);
+    startCountdown(async () => {
+      try {
+        await startScreenRecording(stream);
+        toast.success('Recording! Share audio if you want sound');
+      } catch (err) {
+        toast.error('Recording cancelled');
+      }
+    });
+  }, [stream, startScreenRecording, startCountdown]);
 
   const handleStopRecording = useCallback(async () => {
     const recording = await stopRecording();
@@ -98,7 +116,7 @@ const Index = () => {
           <UrlInput onSubmit={setVideoUrl} error={urlError} />
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {/* View mode toggle */}
           <div className="flex gap-1 p-1 rounded-xl bg-secondary">
             <button
@@ -123,6 +141,15 @@ const Index = () => {
             </button>
           </div>
           
+          {/* Aspect ratio button */}
+          <button
+            onClick={() => setShowAspectRatio(true)}
+            className="p-2 rounded-xl bg-secondary text-foreground"
+            title="Aspect Ratio"
+          >
+            <Ratio className="w-5 h-5" />
+          </button>
+          
           {/* Overlay editor button */}
           <button
             onClick={() => setShowOverlayEditor(true)}
@@ -131,14 +158,38 @@ const Index = () => {
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-secondary text-foreground'
             }`}
+            title="Social Links"
           >
             <Sparkles className="w-5 h-5" />
+          </button>
+          
+          {/* Logo button */}
+          <button
+            onClick={() => setShowLogoUploader(true)}
+            className={`relative p-2 rounded-xl transition-colors ${
+              logo.hasLogo
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-secondary text-foreground'
+            }`}
+            title="Logo/Watermark"
+          >
+            <ImageIcon className="w-5 h-5" />
+          </button>
+          
+          {/* Sound effects button */}
+          <button
+            onClick={() => setShowSoundEffects(true)}
+            className="p-2 rounded-xl bg-secondary text-foreground"
+            title="Sound Effects"
+          >
+            <Volume2 className="w-5 h-5" />
           </button>
           
           {/* Gallery button */}
           <button
             onClick={() => setShowGallery(true)}
             className="relative p-2 rounded-xl bg-secondary text-foreground"
+            title="Recordings"
           >
             <FolderOpen className="w-5 h-5" />
             {recordings.length > 0 && (
@@ -161,6 +212,7 @@ const Index = () => {
               className="absolute inset-0"
             />
             <SocialOverlay settings={overlays.settings} />
+            <LogoOverlay config={logo.config} />
             <AnimatePresence>
               <CameraOverlay
                 videoRef={videoRef}
@@ -179,6 +231,7 @@ const Index = () => {
                 className="absolute inset-0"
               />
               <SocialOverlay settings={overlays.settings} />
+              <LogoOverlay config={logo.config} />
             </div>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -257,6 +310,35 @@ const Index = () => {
         onRemoveSocialLink={overlays.removeSocialLink}
         onSetPosition={overlays.setPosition}
         onToggleBackground={overlays.toggleBackground}
+      />
+
+      {/* Countdown overlay */}
+      <CountdownOverlay count={count} />
+
+      {/* Aspect ratio selector */}
+      <AspectRatioSelector
+        isOpen={showAspectRatio}
+        current={aspectRatio}
+        onSelect={changeAspectRatio}
+        onClose={() => setShowAspectRatio(false)}
+      />
+
+      {/* Sound effects board */}
+      <SoundEffectsBoard
+        isOpen={showSoundEffects}
+        onClose={() => setShowSoundEffects(false)}
+      />
+
+      {/* Logo uploader */}
+      <LogoUploader
+        isOpen={showLogoUploader}
+        config={logo.config}
+        onClose={() => setShowLogoUploader(false)}
+        onUpload={logo.uploadLogo}
+        onRemove={logo.removeLogo}
+        onUpdatePosition={logo.updatePosition}
+        onUpdateSize={logo.updateSize}
+        onUpdateOpacity={logo.updateOpacity}
       />
     </div>
   );
