@@ -78,15 +78,20 @@ const Index = () => {
 
   return (
     <div className="fixed inset-0 bg-background flex flex-col">
-      {/* Header */}
+      {/* Header with URL Input */}
       <motion.header
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="safe-area-top px-4 pt-2 pb-4 flex items-center justify-between z-30"
+        className="safe-area-top px-4 pt-2 pb-2 flex items-center gap-3 z-30"
       >
-        <h1 className="text-xl font-bold text-foreground">
+        <h1 className="text-lg font-bold text-foreground whitespace-nowrap">
           React<span className="text-primary">Cam</span>
         </h1>
+        
+        {/* URL Input - compact in header */}
+        <div className="flex-1 min-w-0">
+          <UrlInput onSubmit={setVideoUrl} error={urlError} />
+        </div>
         
         <div className="flex items-center gap-2">
           {/* View mode toggle */}
@@ -128,20 +133,15 @@ const Index = () => {
         </div>
       </motion.header>
 
-      {/* URL Input */}
-      <div className="px-4 pb-4 z-20">
-        <UrlInput onSubmit={setVideoUrl} error={urlError} />
-      </div>
-
       {/* Main content area */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 flex flex-col p-4 pt-2 pb-0 min-h-0">
         {viewMode === 'pip' ? (
-          // Picture-in-Picture mode
-          <div className="relative h-full">
+          // Picture-in-Picture mode - video container with camera overlay INSIDE
+          <div className="flex-1 relative overflow-hidden rounded-2xl mb-28">
             <YouTubePlayer 
               embedUrl={embedUrl}
               videoId={videoId}
-              className="absolute inset-4 bottom-32 z-10"
+              className="absolute inset-0"
             />
             <AnimatePresence>
               <CameraOverlay
@@ -153,16 +153,18 @@ const Index = () => {
           </div>
         ) : (
           // Split view mode
-          <div className="h-full flex flex-col p-4 gap-4 pb-32">
-            <YouTubePlayer 
-              embedUrl={embedUrl}
-              videoId={videoId}
-              className="flex-1 min-h-0"
-            />
+          <div className="flex-1 flex flex-col gap-3 mb-28 min-h-0">
+            <div className="flex-1 min-h-0 relative overflow-hidden rounded-2xl">
+              <YouTubePlayer 
+                embedUrl={embedUrl}
+                videoId={videoId}
+                className="absolute inset-0"
+              />
+            </div>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="h-48 rounded-2xl overflow-hidden bg-secondary relative"
+              className="h-40 rounded-2xl overflow-hidden bg-secondary relative flex-shrink-0"
             >
               {isActive ? (
                 <video
