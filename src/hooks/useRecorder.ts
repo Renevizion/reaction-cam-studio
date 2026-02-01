@@ -1,3 +1,4 @@
+/* @refresh reset */
 import { useState, useRef, useCallback } from 'react';
 
 export interface Recording {
@@ -26,10 +27,13 @@ export function useRecorder(): UseRecorderReturn {
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  // In the browser, setInterval returns a number (not NodeJS.Timeout)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const combinedStreamRef = useRef<MediaStream | null>(null);
+
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   const startRecording = useCallback(async (cameraStream: MediaStream) => {
     try {
@@ -51,7 +55,15 @@ export function useRecorder(): UseRecorderReturn {
       const videoTracks = screenStream.getVideoTracks();
       
       // Create AudioContext to mix both audio sources
+      if (audioContextRef.current) {
+        try {
+          await audioContextRef.current.close();
+        } catch {
+          // ignore
+        }
+      }
       const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
       const destination = audioContext.createMediaStreamDestination();
       
       // Add microphone audio
@@ -136,6 +148,11 @@ export function useRecorder(): UseRecorderReturn {
         if (combinedStreamRef.current) {
           combinedStreamRef.current.getTracks().forEach(track => track.stop());
           combinedStreamRef.current = null;
+        }
+
+        if (audioContextRef.current) {
+          audioContextRef.current.close().catch(() => undefined);
+          audioContextRef.current = null;
         }
 
         const blob = new Blob(chunksRef.current, { type: 'video/webm' });
