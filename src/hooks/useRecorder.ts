@@ -43,12 +43,15 @@ export function useRecorder(): UseRecorderReturn {
     try {
       chunksRef.current = [];
       
-      // Capture THIS TAB which includes YouTube video AND camera overlay
+      // Capture THIS TAB - preferCurrentTab makes it auto-select current tab in Chrome
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           displaySurface: 'browser',
         },
         audio: true, // Capture system audio (YouTube audio)
+        // @ts-ignore - preferCurrentTab is a newer API
+        preferCurrentTab: true,
+        selfBrowserSurface: 'include',
       });
       
       screenStreamRef.current = screenStream;
@@ -130,17 +133,15 @@ export function useRecorder(): UseRecorderReturn {
     }
   }, []);
 
-  // Screen recording for full reaction videos (face + YouTube + audio)
+  // Screen recording for reacting to ANY screen/window (not just this tab)
   const startScreenRecording = useCallback(async (cameraStream: MediaStream) => {
     try {
       chunksRef.current = [];
       
-      // Capture the screen/tab which includes YouTube video AND camera overlay
+      // Show full screen picker - lets user choose any window/screen
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: 'browser',
-        },
-        audio: true, // Capture system audio (YouTube audio)
+        video: true,
+        audio: true,
       });
       
       screenStreamRef.current = screenStream;

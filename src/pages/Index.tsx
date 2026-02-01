@@ -40,9 +40,9 @@ const Index = () => {
     }
     try {
       await startVideoRecording(stream);
-      toast.success('Recording started - select THIS TAB and enable audio!');
+      toast.success('Recording! Make sure to check "Share tab audio"');
     } catch (err) {
-      toast.error('Screen sharing was cancelled or denied');
+      toast.error('Recording cancelled');
     }
   }, [stream, startVideoRecording]);
 
@@ -53,9 +53,9 @@ const Index = () => {
     }
     try {
       await startScreenRecording(stream);
-      toast.success('Recording started - share your screen!');
+      toast.success('Recording! Share audio if you want sound');
     } catch (err) {
-      toast.error('Screen sharing was cancelled or denied');
+      toast.error('Recording cancelled');
     }
   }, [stream, startScreenRecording]);
 
