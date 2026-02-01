@@ -155,12 +155,6 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
           </motion.div>
         ))}
         
-        {/* Fullscreen indicator */}
-        {isFullscreen && (
-          <div className="absolute top-4 left-4 px-3 py-1 rounded-full glass text-xs text-foreground font-medium">
-            Full Camera View
-          </div>
-        )}
         
         {/* Controls */}
         <div className={`absolute ${isFullscreen ? 'bottom-4 right-4' : 'bottom-2 left-2 right-2'} flex ${isFullscreen ? 'gap-2' : 'justify-between'}`}>
