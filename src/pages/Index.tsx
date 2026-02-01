@@ -33,13 +33,17 @@ const Index = () => {
     }
   }, [isActive, startCamera, stopCamera]);
 
-  const handleStartRecording = useCallback(() => {
+  const handleStartRecording = useCallback(async () => {
     if (!stream) {
       toast.error('Please enable your camera first');
       return;
     }
-    startRecording(stream);
-    toast.success('Recording started');
+    try {
+      await startRecording(stream);
+      toast.success('Recording started - share this tab to capture your reaction!');
+    } catch (err) {
+      toast.error('Screen sharing was cancelled or denied');
+    }
   }, [stream, startRecording]);
 
   const handleStopRecording = useCallback(async () => {
