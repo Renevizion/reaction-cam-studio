@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { motion, PanInfo } from 'framer-motion';
+import { motion, PanInfo, AnimatePresence } from 'framer-motion';
 import { RefreshCw, Maximize2, Minimize2 } from 'lucide-react';
 
 interface CameraOverlayProps {
@@ -45,13 +45,10 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     const parent = containerRef.current?.parentElement;
     if (!parent) return;
 
-    const parentRect = parent.getBoundingClientRect();
-
     setSize(prev => {
       let newWidth = prev.width;
       let newHeight = prev.height;
 
-      // Adjust based on which corner is being dragged
       if (corner.includes('right')) {
         newWidth = Math.max(minSize.width, Math.min(maxSize.width, prev.width + deltaX));
       } else {
@@ -68,7 +65,6 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
       const aspectRatio = 3 / 4;
       newHeight = newWidth / aspectRatio;
 
-      // Constrain to bounds
       if (newHeight > maxSize.height) {
         newHeight = maxSize.height;
         newWidth = newHeight * aspectRatio;
@@ -81,7 +77,6 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
       return { width: newWidth, height: newHeight };
     });
 
-    // Update position if resizing from top or left corners
     if (corner.includes('left')) {
       setPosition(prev => ({
         x: Math.max(16, prev.x + deltaX),
@@ -104,71 +99,28 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     return null;
   }
 
-  // Fullscreen mode
-  if (isFullscreen) {
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="absolute inset-4 z-30 rounded-2xl overflow-hidden shadow-2xl border-2 border-primary/50"
-      >
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="w-full h-full object-cover transform scale-x-[-1]"
-        />
-        
-        {/* Controls */}
-        <div className="absolute bottom-4 right-4 flex gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onSwitchCamera();
-            }}
-            className="w-10 h-10 rounded-full glass flex items-center justify-center active:scale-95 transition-transform"
-          >
-            <RefreshCw className="w-5 h-5 text-foreground" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleFullscreen();
-            }}
-            className="w-10 h-10 rounded-full glass flex items-center justify-center active:scale-95 transition-transform"
-          >
-            <Minimize2 className="w-5 h-5 text-foreground" />
-          </button>
-        </div>
-
-        {/* Fullscreen indicator */}
-        <div className="absolute top-4 left-4 px-3 py-1 rounded-full glass text-xs text-foreground font-medium">
-          Full Camera View
-        </div>
-      </motion.div>
-    );
-  }
-
   return (
     <motion.div
       ref={containerRef}
-      className="absolute z-20 camera-overlay"
-      style={{
+      className={`absolute camera-overlay ${isFullscreen ? 'inset-4 z-30' : 'z-20'}`}
+      style={isFullscreen ? undefined : {
         left: position.x,
         top: position.y,
         width: size.width,
         height: size.height,
       }}
-      drag={!isResizing}
+      drag={!isResizing && !isFullscreen}
       dragMomentum={false}
       onDrag={handleDrag}
       initial={{ opacity: 0, scale: 0.8 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.8 }}
+      layout
     >
-      <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl border-2 border-glass-border/50">
+      <div className={`relative w-full h-full rounded-2xl overflow-hidden shadow-2xl ${
+        isFullscreen ? 'border-2 border-primary/50' : 'border-2 border-glass-border/50'
+      }`}>
+        {/* Single video element - never unmounts */}
         <video
           ref={videoRef}
           autoPlay
@@ -177,8 +129,8 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
           className="w-full h-full object-cover transform scale-x-[-1]"
         />
         
-        {/* Resize handles */}
-        {['top-left', 'top-right', 'bottom-left', 'bottom-right'].map((corner) => (
+        {/* Resize handles - only in non-fullscreen */}
+        {!isFullscreen && ['top-left', 'top-right', 'bottom-left', 'bottom-right'].map((corner) => (
           <motion.div
             key={corner}
             className={`absolute w-6 h-6 ${
@@ -203,30 +155,44 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
           </motion.div>
         ))}
         
-        {/* Camera switch button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onSwitchCamera();
-          }}
-          className="absolute bottom-2 left-2 w-8 h-8 rounded-full glass flex items-center justify-center active:scale-95 transition-transform"
-        >
-          <RefreshCw className="w-4 h-4 text-foreground" />
-        </button>
+        {/* Fullscreen indicator */}
+        {isFullscreen && (
+          <div className="absolute top-4 left-4 px-3 py-1 rounded-full glass text-xs text-foreground font-medium">
+            Full Camera View
+          </div>
+        )}
+        
+        {/* Controls */}
+        <div className={`absolute ${isFullscreen ? 'bottom-4 right-4' : 'bottom-2 left-2 right-2'} flex ${isFullscreen ? 'gap-2' : 'justify-between'}`}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onSwitchCamera();
+            }}
+            className={`${isFullscreen ? 'w-10 h-10' : 'w-8 h-8'} rounded-full glass flex items-center justify-center active:scale-95 transition-transform`}
+          >
+            <RefreshCw className={`${isFullscreen ? 'w-5 h-5' : 'w-4 h-4'} text-foreground`} />
+          </button>
+          
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFullscreen();
+            }}
+            className={`${isFullscreen ? 'w-10 h-10' : 'w-8 h-8'} rounded-full glass flex items-center justify-center active:scale-95 transition-transform`}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-5 h-5 text-foreground" />
+            ) : (
+              <Maximize2 className="w-4 h-4 text-foreground" />
+            )}
+          </button>
+        </div>
 
-        {/* Fullscreen toggle */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleFullscreen();
-          }}
-          className="absolute bottom-2 right-2 w-8 h-8 rounded-full glass flex items-center justify-center active:scale-95 transition-transform"
-        >
-          <Maximize2 className="w-4 h-4 text-foreground" />
-        </button>
-
-        {/* Drag indicator */}
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-white/40" />
+        {/* Drag indicator - only in non-fullscreen */}
+        {!isFullscreen && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-white/40" />
+        )}
       </div>
     </motion.div>
   );
