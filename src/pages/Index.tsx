@@ -1,14 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FolderOpen, Layers, MonitorPlay, Sparkles, Ratio, Volume2, ImageIcon, FileText } from 'lucide-react';
-import { YouTubePlayer } from '@/components/YouTubePlayer';
+import { FolderOpen, Sparkles, Ratio, Volume2, ImageIcon, FileText } from 'lucide-react';
 import { CameraOverlay } from '@/components/CameraOverlay';
 import { TeleprompterOverlay } from '@/components/TeleprompterOverlay';
 import { TeleprompterEditor } from '@/components/TeleprompterEditor';
 import { RecordingControls } from '@/components/RecordingControls';
 import { RecordingsGallery } from '@/components/RecordingsGallery';
 import { VideoPlayerModal } from '@/components/VideoPlayerModal';
-import { UrlInput } from '@/components/UrlInput';
 import { SocialOverlay } from '@/components/SocialOverlay';
 import { OverlayEditor } from '@/components/OverlayEditor';
 import { CountdownOverlay } from '@/components/CountdownOverlay';
@@ -20,7 +18,6 @@ import { AudioLevelMeter } from '@/components/AudioLevelMeter';
 import { useCamera } from '@/hooks/useCamera';
 import { useRecorder, Recording } from '@/hooks/useRecorder';
 import { useRecordings } from '@/hooks/useRecordings';
-import { useYouTube } from '@/hooks/useYouTube';
 import { useOverlays } from '@/hooks/useOverlays';
 import { useCountdown } from '@/hooks/useCountdown';
 import { useAspectRatio } from '@/hooks/useAspectRatio';
@@ -28,10 +25,7 @@ import { useLogo } from '@/hooks/useLogo';
 import { useTeleprompter } from '@/hooks/useTeleprompter';
 import { toast } from 'sonner';
 
-type ViewMode = 'pip' | 'split';
-
 const Index = () => {
-  const [viewMode, setViewMode] = useState<ViewMode>('pip');
   const [showGallery, setShowGallery] = useState(false);
   const [showOverlayEditor, setShowOverlayEditor] = useState(false);
   const [showAspectRatio, setShowAspectRatio] = useState(false);
@@ -40,7 +34,6 @@ const Index = () => {
   const [showTeleprompterEditor, setShowTeleprompterEditor] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
   
-  const { embedUrl, videoId, setVideoUrl, isValidUrl, error: urlError } = useYouTube();
   const { stream, isActive, startCamera, stopCamera, switchCamera, videoRef, error: cameraError } = useCamera();
   const { isRecording, isPaused, duration, recordingMode, startVideoRecording, startScreenRecording, stopRecording, pauseRecording, resumeRecording } = useRecorder();
   const { recordings, addRecording, deleteRecording, downloadRecording } = useRecordings();
@@ -58,7 +51,7 @@ const Index = () => {
     }
   }, [isActive, startCamera, stopCamera]);
 
-  const handleStartVideoRecording = useCallback(async () => {
+  const handleStartRecording = useCallback(async () => {
     if (!stream) {
       toast.error('Please enable your camera first');
       return;
@@ -66,27 +59,12 @@ const Index = () => {
     startCountdown(async () => {
       try {
         await startVideoRecording(stream);
-        toast.success('Recording! Make sure to check "Share tab audio"');
+        toast.success('Recording started!');
       } catch (err) {
         toast.error('Recording cancelled');
       }
     });
   }, [stream, startVideoRecording, startCountdown]);
-
-  const handleStartScreenRecording = useCallback(async () => {
-    if (!stream) {
-      toast.error('Please enable your camera first');
-      return;
-    }
-    startCountdown(async () => {
-      try {
-        await startScreenRecording(stream);
-        toast.success('Recording! Share audio if you want sound');
-      } catch (err) {
-        toast.error('Recording cancelled');
-      }
-    });
-  }, [stream, startScreenRecording, startCountdown]);
 
   const handleStopRecording = useCallback(async () => {
     const recording = await stopRecording();
@@ -107,46 +85,19 @@ const Index = () => {
 
   return (
     <div className="fixed inset-0 bg-background flex flex-col">
-      {/* Header with URL Input */}
+      {/* Header */}
       <motion.header
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         className="safe-area-top px-4 pt-2 pb-2 flex items-center gap-3 z-30"
       >
         <h1 className="text-lg font-bold text-foreground whitespace-nowrap">
-          React<span className="text-primary">Cam</span>
+          Script<span className="text-primary">Cam</span>
         </h1>
         
-        {/* URL Input - compact in header */}
-        <div className="flex-1 min-w-0">
-          <UrlInput onSubmit={setVideoUrl} error={urlError} />
-        </div>
+        <div className="flex-1" />
         
         <div className="flex items-center gap-1">
-          {/* View mode toggle */}
-          <div className="flex gap-1 p-1 rounded-xl bg-secondary">
-            <button
-              onClick={() => setViewMode('pip')}
-              className={`p-2 rounded-lg transition-all ${
-                viewMode === 'pip' 
-                  ? 'bg-primary text-primary-foreground' 
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <Layers className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setViewMode('split')}
-              className={`p-2 rounded-lg transition-all ${
-                viewMode === 'split' 
-                  ? 'bg-primary text-primary-foreground' 
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <MonitorPlay className="w-5 h-5" />
-            </button>
-          </div>
-          
           {/* Aspect ratio button */}
           <button
             onClick={() => setShowAspectRatio(true)}
@@ -220,87 +171,48 @@ const Index = () => {
         </div>
       </motion.header>
 
-      {/* Main content area */}
+      {/* Main content — full camera view */}
       <div className="flex-1 flex flex-col p-4 pt-2 pb-0 min-h-0">
-        {viewMode === 'pip' ? (
-          // Picture-in-Picture mode - video container with camera overlay INSIDE
-          <div className="flex-1 flex items-center justify-center mb-28">
-            <div 
-              className="relative overflow-hidden rounded-2xl bg-secondary w-full h-full max-w-full max-h-full"
-              style={{ aspectRatio: currentConfig.ratio }}
-            >
-              <YouTubePlayer 
-                embedUrl={embedUrl}
-                videoId={videoId}
-                className="absolute inset-0"
+        <div className="flex-1 flex items-center justify-center mb-28">
+          <div 
+            className="relative overflow-hidden rounded-2xl bg-secondary w-full h-full max-w-full max-h-full"
+            style={{ aspectRatio: currentConfig.ratio }}
+          >
+            {/* Full-screen camera feed */}
+            {isActive ? (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
               />
-              <SocialOverlay settings={overlays.settings} />
-              <LogoOverlay config={logo.config} />
-              <TeleprompterOverlay
-                state={teleprompter.state}
-                scrollRef={teleprompter.scrollRef}
-                onToggleAutoScroll={teleprompter.toggleAutoScroll}
-                onResetScroll={teleprompter.resetScroll}
-                onSetScrollSpeed={teleprompter.setScrollSpeed}
-                onSetFontSize={teleprompter.setFontSize}
-              />
-              <AnimatePresence>
-                <CameraOverlay
-                  videoRef={videoRef}
-                  isActive={isActive}
-                  onSwitchCamera={switchCamera}
-                />
-              </AnimatePresence>
-            </div>
-          </div>
-        ) : (
-          // Split view mode
-          <div className="flex-1 flex flex-col gap-3 mb-28 min-h-0">
-            <div className="flex-1 min-h-0 flex items-center justify-center">
-              <div 
-                className="relative overflow-hidden rounded-2xl bg-secondary w-full h-full max-w-full max-h-full"
-                style={{ aspectRatio: currentConfig.ratio }}
-              >
-                <YouTubePlayer 
-                  embedUrl={embedUrl}
-                  videoId={videoId}
-                  className="absolute inset-0"
-                />
-                <SocialOverlay settings={overlays.settings} />
-                <LogoOverlay config={logo.config} />
-                <TeleprompterOverlay
-                  state={teleprompter.state}
-                  scrollRef={teleprompter.scrollRef}
-                  onToggleAutoScroll={teleprompter.toggleAutoScroll}
-                  onResetScroll={teleprompter.resetScroll}
-                  onSetScrollSpeed={teleprompter.setScrollSpeed}
-                  onSetFontSize={teleprompter.setFontSize}
-                />
-              </div>
-            </div>
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="h-40 rounded-2xl overflow-hidden bg-secondary relative flex-shrink-0"
-            >
-              {isActive ? (
-                <video
-                  ref={viewMode === 'split' ? videoRef : undefined}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover transform scale-x-[-1]"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <p className="text-muted-foreground text-sm">
-                    Camera preview will appear here
-                  </p>
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+                <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center">
+                  <svg className="w-10 h-10 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                  </svg>
                 </div>
-              )}
-            </motion.div>
+                <p className="text-muted-foreground text-sm">
+                  Enable your camera to get started
+                </p>
+              </div>
+            )}
+
+            {/* Overlays on top of camera */}
+            <SocialOverlay settings={overlays.settings} />
+            <LogoOverlay config={logo.config} />
+            <TeleprompterOverlay
+              state={teleprompter.state}
+              scrollRef={teleprompter.scrollRef}
+              onToggleAutoScroll={teleprompter.toggleAutoScroll}
+              onResetScroll={teleprompter.resetScroll}
+              onSetScrollSpeed={teleprompter.setScrollSpeed}
+              onSetFontSize={teleprompter.setFontSize}
+            />
           </div>
-        )}
+        </div>
 
         {/* Audio level meter */}
         <AnimatePresence>
@@ -318,8 +230,8 @@ const Index = () => {
           isCameraActive={isActive}
           duration={duration}
           recordingMode={recordingMode}
-          onStartVideoRecording={handleStartVideoRecording}
-          onStartScreenRecording={handleStartScreenRecording}
+          onStartVideoRecording={handleStartRecording}
+          onStartScreenRecording={handleStartRecording}
           onStopRecording={handleStopRecording}
           onPauseRecording={pauseRecording}
           onResumeRecording={resumeRecording}
