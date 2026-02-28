@@ -1,8 +1,10 @@
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FolderOpen, Layers, MonitorPlay, Sparkles, Ratio, Volume2, ImageIcon } from 'lucide-react';
+import { FolderOpen, Layers, MonitorPlay, Sparkles, Ratio, Volume2, ImageIcon, FileText } from 'lucide-react';
 import { YouTubePlayer } from '@/components/YouTubePlayer';
 import { CameraOverlay } from '@/components/CameraOverlay';
+import { TeleprompterOverlay } from '@/components/TeleprompterOverlay';
+import { TeleprompterEditor } from '@/components/TeleprompterEditor';
 import { RecordingControls } from '@/components/RecordingControls';
 import { RecordingsGallery } from '@/components/RecordingsGallery';
 import { VideoPlayerModal } from '@/components/VideoPlayerModal';
@@ -23,6 +25,7 @@ import { useOverlays } from '@/hooks/useOverlays';
 import { useCountdown } from '@/hooks/useCountdown';
 import { useAspectRatio } from '@/hooks/useAspectRatio';
 import { useLogo } from '@/hooks/useLogo';
+import { useTeleprompter } from '@/hooks/useTeleprompter';
 import { toast } from 'sonner';
 
 type ViewMode = 'pip' | 'split';
@@ -34,6 +37,7 @@ const Index = () => {
   const [showAspectRatio, setShowAspectRatio] = useState(false);
   const [showSoundEffects, setShowSoundEffects] = useState(false);
   const [showLogoUploader, setShowLogoUploader] = useState(false);
+  const [showTeleprompterEditor, setShowTeleprompterEditor] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
   
   const { embedUrl, videoId, setVideoUrl, isValidUrl, error: urlError } = useYouTube();
@@ -44,6 +48,7 @@ const Index = () => {
   const { count, isCountingDown, startCountdown, cancelCountdown } = useCountdown(3);
   const { aspectRatio, currentConfig, changeAspectRatio, presets } = useAspectRatio();
   const logo = useLogo();
+  const teleprompter = useTeleprompter();
 
   const handleToggleCamera = useCallback(async () => {
     if (isActive) {
@@ -177,6 +182,19 @@ const Index = () => {
             <ImageIcon className="w-5 h-5" />
           </button>
           
+          {/* Script/Teleprompter button */}
+          <button
+            onClick={() => setShowTeleprompterEditor(true)}
+            className={`relative p-2 rounded-xl transition-colors ${
+              teleprompter.hasScript
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-secondary text-foreground'
+            }`}
+            title="Script / Teleprompter"
+          >
+            <FileText className="w-5 h-5" />
+          </button>
+          
           {/* Sound effects button */}
           <button
             onClick={() => setShowSoundEffects(true)}
@@ -218,6 +236,14 @@ const Index = () => {
               />
               <SocialOverlay settings={overlays.settings} />
               <LogoOverlay config={logo.config} />
+              <TeleprompterOverlay
+                state={teleprompter.state}
+                scrollRef={teleprompter.scrollRef}
+                onToggleAutoScroll={teleprompter.toggleAutoScroll}
+                onResetScroll={teleprompter.resetScroll}
+                onSetScrollSpeed={teleprompter.setScrollSpeed}
+                onSetFontSize={teleprompter.setFontSize}
+              />
               <AnimatePresence>
                 <CameraOverlay
                   videoRef={videoRef}
@@ -242,6 +268,14 @@ const Index = () => {
                 />
                 <SocialOverlay settings={overlays.settings} />
                 <LogoOverlay config={logo.config} />
+                <TeleprompterOverlay
+                  state={teleprompter.state}
+                  scrollRef={teleprompter.scrollRef}
+                  onToggleAutoScroll={teleprompter.toggleAutoScroll}
+                  onResetScroll={teleprompter.resetScroll}
+                  onSetScrollSpeed={teleprompter.setScrollSpeed}
+                  onSetFontSize={teleprompter.setFontSize}
+                />
               </div>
             </div>
             <motion.div
@@ -359,6 +393,15 @@ const Index = () => {
         onUpdatePosition={logo.updatePosition}
         onUpdateSize={logo.updateSize}
         onUpdateOpacity={logo.updateOpacity}
+      />
+
+      {/* Teleprompter editor */}
+      <TeleprompterEditor
+        isOpen={showTeleprompterEditor}
+        script={teleprompter.state.script}
+        onClose={() => setShowTeleprompterEditor(false)}
+        onSave={teleprompter.setScript}
+        onShow={teleprompter.show}
       />
     </div>
   );
