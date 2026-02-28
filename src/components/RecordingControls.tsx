@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Circle, Square, Pause, Play, Video, VideoOff, Monitor, Film } from 'lucide-react';
+import { Circle, Square, Pause, Play, Video, VideoOff } from 'lucide-react';
 
 interface RecordingControlsProps {
   isRecording: boolean;
@@ -29,19 +29,16 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   duration,
   recordingMode,
   onStartVideoRecording,
-  onStartScreenRecording,
   onStopRecording,
   onPauseRecording,
   onResumeRecording,
   onToggleCamera,
 }) => {
-  const [showOptions, setShowOptions] = useState(false);
-
   const handleRecordClick = () => {
     if (isRecording) {
       onStopRecording();
     } else {
-      setShowOptions(true);
+      onStartVideoRecording();
     }
   };
 
@@ -51,56 +48,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       animate={{ y: 0, opacity: 1 }}
       className="absolute bottom-0 left-0 right-0 safe-area-bottom"
     >
-      {/* Recording mode selector */}
-      <AnimatePresence>
-        {showOptions && !isRecording && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            className="mx-4 mb-2 p-3 glass-strong rounded-2xl"
-          >
-            <p className="text-center text-sm text-muted-foreground mb-3">
-              Both modes capture your face + content together
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => {
-                  setShowOptions(false);
-                  onStartVideoRecording();
-                }}
-                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors"
-              >
-                <Film className="w-6 h-6 text-primary" />
-                <span className="text-sm font-medium text-foreground">Camera + Video</span>
-                <span className="text-xs text-muted-foreground text-center">
-                  This tab (auto-select)
-                </span>
-              </button>
-              <button
-                onClick={() => {
-                  setShowOptions(false);
-                  onStartScreenRecording();
-                }}
-                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors"
-              >
-                <Monitor className="w-6 h-6 text-primary" />
-                <span className="text-sm font-medium text-foreground">Camera + Screen</span>
-                <span className="text-xs text-muted-foreground text-center">
-                  Any window/screen
-                </span>
-              </button>
-            </div>
-            <button
-              onClick={() => setShowOptions(false)}
-              className="w-full mt-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Cancel
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <div className="glass-strong mx-4 mb-4 rounded-3xl p-4">
         {/* Duration display when recording */}
         {isRecording && (
@@ -113,11 +60,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             <span className="font-mono text-lg font-semibold text-foreground">
               {formatDuration(duration)}
             </span>
-            {recordingMode && (
-              <span className="px-2 py-0.5 rounded-full bg-secondary text-xs text-muted-foreground">
-                {recordingMode === 'video' ? 'Video' : 'Screen'}
-              </span>
-            )}
             {isPaused && (
               <span className="text-xs text-muted-foreground uppercase tracking-wider">
                 Paused
