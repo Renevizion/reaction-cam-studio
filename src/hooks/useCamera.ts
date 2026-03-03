@@ -24,15 +24,17 @@ export function useCamera(): UseCameraReturn {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30 },
         },
+        // Disable all browser audio processing — these filters degrade quality
+        // and interfere with Bluetooth mics. Native camera apps don't use them.
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
           sampleRate: { ideal: 48000 },
-          channelCount: { ideal: 1 },
         },
       });
 
@@ -71,15 +73,15 @@ export function useCamera(): UseCameraReturn {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: newFacingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30 },
         },
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
           sampleRate: { ideal: 48000 },
-          channelCount: { ideal: 1 },
         },
       });
       setStream(mediaStream);

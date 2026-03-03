@@ -60,6 +60,8 @@
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
   }
 
   body {
@@ -69,6 +71,11 @@
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+    touch-action: manipulation;
+  }
+
+  input, textarea, select, button {
+    font-size: 16px; /* Prevents iOS zoom on focus */
   }
 }
 
