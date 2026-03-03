@@ -27,7 +27,13 @@ export function useCamera(): UseCameraReturn {
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
-        audio: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: { ideal: 48000 },
+          channelCount: { ideal: 1 },
+        },
       });
 
       setStream(mediaStream);
@@ -68,7 +74,13 @@ export function useCamera(): UseCameraReturn {
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
-        audio: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: { ideal: 48000 },
+          channelCount: { ideal: 1 },
+        },
       });
       setStream(mediaStream);
       setIsActive(true);

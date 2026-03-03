@@ -67,9 +67,12 @@ export function useRecorder(): UseRecorderReturn {
       recordingStreamRef.current = recordingStream;
 
       const mimeType = getSupportedMimeType();
-      const mediaRecorder = mimeType
-        ? new MediaRecorder(recordingStream, { mimeType })
-        : new MediaRecorder(recordingStream);
+      const options: MediaRecorderOptions = {};
+      if (mimeType) options.mimeType = mimeType;
+      // Request high bitrate to avoid laggy/compressed output
+      options.videoBitsPerSecond = 5_000_000; // 5 Mbps video
+      options.audioBitsPerSecond = 128_000;   // 128 kbps audio
+      const mediaRecorder = new MediaRecorder(recordingStream, options);
 
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
