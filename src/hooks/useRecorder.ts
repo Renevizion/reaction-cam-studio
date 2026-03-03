@@ -34,194 +34,76 @@ export function useRecorder(): UseRecorderReturn {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
-  const screenStreamRef = useRef<MediaStream | null>(null);
-  const combinedStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
 
-  // Camera + Video recording (captures this tab with YouTube + camera overlay)
+  const getSupportedMimeType = useCallback(() => {
+    const candidates = [
+      'video/mp4;codecs=h264,aac',
+      'video/mp4',
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm',
+    ];
+
+    return candidates.find((type) => MediaRecorder.isTypeSupported(type));
+  }, []);
+
+  const startCameraRecording = useCallback(async (cameraStream: MediaStream, mode: RecordingMode) => {
+    try {
+      chunksRef.current = [];
+
+      const videoTracks = cameraStream.getVideoTracks();
+      const audioTracks = cameraStream.getAudioTracks();
+
+      if (videoTracks.length === 0) {
+        throw new Error('No camera video track available');
+      }
+
+      const recordingStream = new MediaStream([
+        ...videoTracks.map((track) => track.clone()),
+        ...audioTracks.map((track) => track.clone()),
+      ]);
+
+      recordingStreamRef.current = recordingStream;
+
+      const mimeType = getSupportedMimeType();
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(recordingStream, { mimeType })
+        : new MediaRecorder(recordingStream);
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start(1000);
+
+      setIsRecording(true);
+      setIsPaused(false);
+      setDuration(0);
+      setRecordingMode(mode);
+      startTimeRef.current = Date.now();
+
+      timerRef.current = setInterval(() => {
+        setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to start recording:', err);
+      throw err;
+    }
+  }, [getSupportedMimeType]);
+
+  // Camera recording (iPhone/Safari friendly - no screen capture API required)
   const startVideoRecording = useCallback(async (cameraStream: MediaStream) => {
-    try {
-      chunksRef.current = [];
-      
-      // Capture THIS TAB - preferCurrentTab makes it auto-select current tab in Chrome
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: 'browser',
-        },
-        audio: true, // Capture system audio (YouTube audio)
-        // @ts-ignore - preferCurrentTab is a newer API
-        preferCurrentTab: true,
-        selfBrowserSurface: 'include',
-      });
-      
-      screenStreamRef.current = screenStream;
-      
-      // Combine screen video with camera audio (mic)
-      const audioTracks = cameraStream.getAudioTracks();
-      const screenAudioTracks = screenStream.getAudioTracks();
-      const videoTracks = screenStream.getVideoTracks();
-      
-      // Create AudioContext to mix both audio sources
-      if (audioContextRef.current) {
-        try {
-          await audioContextRef.current.close();
-        } catch {
-          // ignore
-        }
-      }
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      const destination = audioContext.createMediaStreamDestination();
-      
-      // Add microphone audio
-      if (audioTracks.length > 0) {
-        const micSource = audioContext.createMediaStreamSource(new MediaStream(audioTracks));
-        micSource.connect(destination);
-      }
-      
-      // Add system/YouTube audio
-      if (screenAudioTracks.length > 0) {
-        const systemSource = audioContext.createMediaStreamSource(new MediaStream(screenAudioTracks));
-        systemSource.connect(destination);
-      }
-      
-      // Combine video from screen and mixed audio
-      const combinedStream = new MediaStream([
-        ...videoTracks,
-        ...destination.stream.getAudioTracks(),
-      ]);
-      
-      combinedStreamRef.current = combinedStream;
-      
-      // Determine supported MIME type
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : MediaRecorder.isTypeSupported('video/webm')
-        ? 'video/webm'
-        : 'video/mp4';
-      
-      const mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
+    await startCameraRecording(cameraStream, 'video');
+  }, [startCameraRecording]);
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-
-      // Handle when user stops screen sharing via browser UI
-      screenStream.getVideoTracks()[0].onended = () => {
-        if (mediaRecorderRef.current?.state === 'recording') {
-          mediaRecorderRef.current.stop();
-        }
-      };
-
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(1000);
-      
-      setIsRecording(true);
-      setIsPaused(false);
-      setDuration(0);
-      setRecordingMode('video');
-      startTimeRef.current = Date.now();
-
-      timerRef.current = setInterval(() => {
-        setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
-      }, 1000);
-    } catch (err) {
-      console.error('Failed to start video recording:', err);
-      throw err;
-    }
-  }, []);
-
-  // Screen recording for reacting to ANY screen/window (not just this tab)
+  // Kept for API compatibility; currently same behavior as video recording
   const startScreenRecording = useCallback(async (cameraStream: MediaStream) => {
-    try {
-      chunksRef.current = [];
-      
-      // Show full screen picker - lets user choose any window/screen
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true,
-      });
-      
-      screenStreamRef.current = screenStream;
-      
-      // Combine screen video with camera audio (mic)
-      const audioTracks = cameraStream.getAudioTracks();
-      const screenAudioTracks = screenStream.getAudioTracks();
-      const videoTracks = screenStream.getVideoTracks();
-      
-      // Create AudioContext to mix both audio sources
-      if (audioContextRef.current) {
-        try {
-          await audioContextRef.current.close();
-        } catch {
-          // ignore
-        }
-      }
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      const destination = audioContext.createMediaStreamDestination();
-      
-      // Add microphone audio
-      if (audioTracks.length > 0) {
-        const micSource = audioContext.createMediaStreamSource(new MediaStream(audioTracks));
-        micSource.connect(destination);
-      }
-      
-      // Add system/YouTube audio
-      if (screenAudioTracks.length > 0) {
-        const systemSource = audioContext.createMediaStreamSource(new MediaStream(screenAudioTracks));
-        systemSource.connect(destination);
-      }
-      
-      // Combine video from screen and mixed audio
-      const combinedStream = new MediaStream([
-        ...videoTracks,
-        ...destination.stream.getAudioTracks(),
-      ]);
-      
-      combinedStreamRef.current = combinedStream;
-      
-      // Determine supported MIME type
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : MediaRecorder.isTypeSupported('video/webm')
-        ? 'video/webm'
-        : 'video/mp4';
-      
-      const mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-
-      // Handle when user stops screen sharing via browser UI
-      screenStream.getVideoTracks()[0].onended = () => {
-        if (mediaRecorderRef.current?.state === 'recording') {
-          mediaRecorderRef.current.stop();
-        }
-      };
-
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(1000);
-      
-      setIsRecording(true);
-      setIsPaused(false);
-      setDuration(0);
-      setRecordingMode('screen');
-      startTimeRef.current = Date.now();
-
-      timerRef.current = setInterval(() => {
-        setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
-      }, 1000);
-    } catch (err) {
-      console.error('Failed to start screen recording:', err);
-      throw err;
-    }
-  }, []);
+    await startCameraRecording(cameraStream, 'screen');
+  }, [startCameraRecording]);
 
   const stopRecording = useCallback(async (): Promise<Recording | null> => {
     return new Promise((resolve) => {
@@ -238,22 +120,17 @@ export function useRecorder(): UseRecorderReturn {
       const currentDuration = duration;
 
       mediaRecorderRef.current.onstop = () => {
-        // Stop all screen capture tracks
-        if (screenStreamRef.current) {
-          screenStreamRef.current.getTracks().forEach(track => track.stop());
-          screenStreamRef.current = null;
-        }
-        if (combinedStreamRef.current) {
-          combinedStreamRef.current.getTracks().forEach(track => track.stop());
-          combinedStreamRef.current = null;
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+          recordingStreamRef.current = null;
         }
 
-        if (audioContextRef.current) {
-          audioContextRef.current.close().catch(() => undefined);
-          audioContextRef.current = null;
-        }
+        const blobType =
+          chunksRef.current[0]?.type ||
+          mediaRecorderRef.current?.mimeType ||
+          'video/webm';
 
-        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+        const blob = new Blob(chunksRef.current, { type: blobType });
         const url = URL.createObjectURL(blob);
         
         const recording: Recording = {
