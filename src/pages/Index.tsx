@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FolderOpen, Sparkles, Ratio, Volume2, ImageIcon, FileText } from 'lucide-react';
 import { CameraOverlay } from '@/components/CameraOverlay';
@@ -15,6 +15,7 @@ import { SoundEffectsBoard } from '@/components/SoundEffectsBoard';
 import { LogoUploader } from '@/components/LogoUploader';
 import { LogoOverlay } from '@/components/LogoOverlay';
 import { AudioLevelMeter } from '@/components/AudioLevelMeter';
+import { OnboardingModal, hasOnboarded } from '@/components/OnboardingModal';
 import { useCamera } from '@/hooks/useCamera';
 import { useRecorder, Recording } from '@/hooks/useRecorder';
 import { useRecordings } from '@/hooks/useRecordings';
@@ -32,11 +33,16 @@ const Index = () => {
   const [showSoundEffects, setShowSoundEffects] = useState(false);
   const [showLogoUploader, setShowLogoUploader] = useState(false);
   const [showTeleprompterEditor, setShowTeleprompterEditor] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
-  
+
+  useEffect(() => {
+    if (!hasOnboarded()) setShowOnboarding(true);
+  }, []);
+
   const { stream, isActive, startCamera, stopCamera, switchCamera, videoRef, error: cameraError } = useCamera();
   const { isRecording, isPaused, duration, recordingMode, startVideoRecording, startScreenRecording, stopRecording, pauseRecording, resumeRecording } = useRecorder();
-  const { recordings, addRecording, deleteRecording, downloadRecording } = useRecordings();
+  const { recordings, addRecording, deleteRecording, downloadRecording, shareRecording } = useRecordings();
   const overlays = useOverlays();
   const { count, isCountingDown, startCountdown, cancelCountdown } = useCountdown(3);
   const { aspectRatio, currentConfig, changeAspectRatio, presets } = useAspectRatio();
@@ -188,15 +194,24 @@ const Index = () => {
                 className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
               />
             ) : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-                <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center">
-                  <svg className="w-10 h-10 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-                  </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center">
+                <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center">
+                  <FileText className="w-10 h-10 text-primary" />
                 </div>
-                <p className="text-muted-foreground text-sm">
-                  Enable your camera to get started
-                </p>
+                <div className="space-y-2 max-w-xs">
+                  <h2 className="text-xl font-bold text-foreground leading-tight">
+                    Paste your script. Read on camera. Record.
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Built for creators who already have content ready. Studio-quality 1080p, perfect for TikTok, Reels & Shorts.
+                  </p>
+                </div>
+                <button
+                  onClick={handleToggleCamera}
+                  className="mt-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-semibold shadow-lg hover:bg-primary/90 transition-colors"
+                >
+                  Enable Camera
+                </button>
               </div>
             )}
 
@@ -258,6 +273,10 @@ const Index = () => {
         onPlay={handlePlay}
         onDelete={handleDelete}
         onDownload={downloadRecording}
+        onShare={async (rec) => {
+          const ok = await shareRecording(rec);
+          if (!ok) toast.success('Downloaded — upload it to TikTok, Reels, or Shorts');
+        }}
       />
 
       {/* Video player modal */}
@@ -314,6 +333,12 @@ const Index = () => {
         onClose={() => setShowTeleprompterEditor(false)}
         onSave={teleprompter.setScript}
         onShow={teleprompter.show}
+      />
+
+      {/* First-run onboarding */}
+      <OnboardingModal
+        isOpen={showOnboarding}
+        onClose={() => setShowOnboarding(false)}
       />
     </div>
   );
