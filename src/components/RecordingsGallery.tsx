@@ -35,6 +35,7 @@ export const RecordingsGallery: React.FC<RecordingsGalleryProps> = ({
   onPlay,
   onDelete,
   onDownload,
+  onShare,
 }) => {
   return (
     <AnimatePresence>
