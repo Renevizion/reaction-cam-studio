@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Play, Trash2, Download, Clock } from 'lucide-react';
+import { X, Play, Trash2, Download, Clock, Share2 } from 'lucide-react';
 import { Recording } from '@/hooks/useRecorder';
 
 interface RecordingsGalleryProps {
@@ -10,6 +10,7 @@ interface RecordingsGalleryProps {
   onPlay: (recording: Recording) => void;
   onDelete: (id: string) => void;
   onDownload: (recording: Recording) => void;
+  onShare?: (recording: Recording) => void;
 }
 
 const formatDuration = (seconds: number): string => {
