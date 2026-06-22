@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FolderOpen, Sparkles, Ratio, Volume2, ImageIcon, FileText } from 'lucide-react';
 import { CameraOverlay } from '@/components/CameraOverlay';
@@ -15,6 +15,7 @@ import { SoundEffectsBoard } from '@/components/SoundEffectsBoard';
 import { LogoUploader } from '@/components/LogoUploader';
 import { LogoOverlay } from '@/components/LogoOverlay';
 import { AudioLevelMeter } from '@/components/AudioLevelMeter';
+import { OnboardingModal, hasOnboarded } from '@/components/OnboardingModal';
 import { useCamera } from '@/hooks/useCamera';
 import { useRecorder, Recording } from '@/hooks/useRecorder';
 import { useRecordings } from '@/hooks/useRecordings';
@@ -32,11 +33,16 @@ const Index = () => {
   const [showSoundEffects, setShowSoundEffects] = useState(false);
   const [showLogoUploader, setShowLogoUploader] = useState(false);
   const [showTeleprompterEditor, setShowTeleprompterEditor] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
-  
+
+  useEffect(() => {
+    if (!hasOnboarded()) setShowOnboarding(true);
+  }, []);
+
   const { stream, isActive, startCamera, stopCamera, switchCamera, videoRef, error: cameraError } = useCamera();
   const { isRecording, isPaused, duration, recordingMode, startVideoRecording, startScreenRecording, stopRecording, pauseRecording, resumeRecording } = useRecorder();
-  const { recordings, addRecording, deleteRecording, downloadRecording } = useRecordings();
+  const { recordings, addRecording, deleteRecording, downloadRecording, shareRecording } = useRecordings();
   const overlays = useOverlays();
   const { count, isCountingDown, startCountdown, cancelCountdown } = useCountdown(3);
   const { aspectRatio, currentConfig, changeAspectRatio, presets } = useAspectRatio();
