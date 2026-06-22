@@ -273,6 +273,10 @@ const Index = () => {
         onPlay={handlePlay}
         onDelete={handleDelete}
         onDownload={downloadRecording}
+        onShare={async (rec) => {
+          const ok = await shareRecording(rec);
+          if (!ok) toast.success('Downloaded — upload it to TikTok, Reels, or Shorts');
+        }}
       />
 
       {/* Video player modal */}
