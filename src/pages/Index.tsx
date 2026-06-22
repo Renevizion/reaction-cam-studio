@@ -334,6 +334,12 @@ const Index = () => {
         onSave={teleprompter.setScript}
         onShow={teleprompter.show}
       />
+
+      {/* First-run onboarding */}
+      <OnboardingModal
+        isOpen={showOnboarding}
+        onClose={() => setShowOnboarding(false)}
+      />
     </div>
   );
 };
