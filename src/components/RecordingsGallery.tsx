@@ -62,12 +62,13 @@ export const RecordingsGallery: React.FC<RecordingsGalleryProps> = ({
           {/* Content */}
           <div className="p-4 overflow-y-auto no-scrollbar" style={{ height: 'calc(100vh - 100px)' }}>
             {recordings.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-64 text-center">
+              <div className="flex flex-col items-center justify-center h-64 text-center px-6">
                 <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
                   <Play className="w-8 h-8 text-muted-foreground" />
                 </div>
-                <p className="text-muted-foreground">
-                  No recordings yet. Start recording your reactions!
+                <p className="text-foreground font-medium mb-1">No recordings yet</p>
+                <p className="text-muted-foreground text-sm">
+                  Paste your script, hit record, and your takes will appear here.
                 </p>
               </div>
             ) : (
