@@ -49,7 +49,7 @@ export const RecordingsGallery: React.FC<RecordingsGalleryProps> = ({
           {/* Header */}
           <div className="safe-area-top px-4 py-4 flex items-center justify-between border-b border-border">
             <h2 className="text-xl font-semibold text-foreground">
-              My Reactions
+              My Recordings
             </h2>
             <button
               onClick={onClose}
