@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import { Recording } from '@/hooks/useRecorder';
@@ -12,6 +12,12 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   recording,
   onClose,
 }) => {
+  const [videoReady, setVideoReady] = useState(false);
+
+  useEffect(() => {
+    setVideoReady(false);
+  }, [recording?.id]);
+
   return (
     <AnimatePresence>
       {recording && (
@@ -28,13 +34,16 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
             <X className="w-5 h-5" />
           </button>
           
+          {!videoReady && <div className="absolute inset-0 bg-black" />}
           <video
             key={recording.id}
             src={recording.url}
-            className="w-full h-full object-contain"
+            className={`w-full h-full object-contain bg-black ${videoReady ? 'opacity-100' : 'opacity-0'}`}
             controls
             autoPlay
             playsInline
+            preload="auto"
+            onLoadedData={() => setVideoReady(true)}
             onError={() => {
               console.error('Playback failed for recording', recording.id, recording.blob.type);
             }}

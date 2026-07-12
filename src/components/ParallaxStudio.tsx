@@ -140,8 +140,8 @@ const getRecordingProfile = (width: number, height: number, fps: number, preset:
   const mimeType = getPreferredRecorderMimeType([
     "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
     "video/mp4",
-    "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
+    "video/webm;codecs=vp9,opus",
     "video/webm",
   ]);
 
@@ -251,6 +251,8 @@ export default function Compositor() {
   const [startingWebcam, setStartingWebcam] = useState(false);
   const [screenMeta, setScreenMeta] = useState<string>("");
   const [webcamMeta, setWebcamMeta] = useState<string>("");
+  const [activeCameraLabel, setActiveCameraLabel] = useState("");
+  const [activeMicLabel, setActiveMicLabel] = useState("");
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraDeviceId, setSelectedCameraDeviceId] = useState(() => localStorage.getItem(CAMERA_DEVICE_KEY) || "");
@@ -1007,14 +1009,19 @@ export default function Compositor() {
       v.srcObject = stream;
       await v.play();
       const track = stream.getVideoTracks()[0];
+      const micTrack = stream.getAudioTracks()[0];
       const s = track.getSettings();
       const hasMic = stream.getAudioTracks().length > 0;
       setWebcamMeta(`${track.label || "camera"} · ${s.width ?? "?"}×${s.height ?? "?"}${hasMic ? " · mic live" : ""}`);
+      setActiveCameraLabel(track.label || "Camera");
+      setActiveMicLabel(micTrack?.label || "");
       if (!targetDeviceId && s.deviceId) setSelectedCameraDeviceId(s.deviceId);
       void refreshMediaDevices();
       track.addEventListener("ended", () => {
         setWebcamReady(false);
         setWebcamMeta("");
+        setActiveCameraLabel("");
+        setActiveMicLabel("");
       });
       setWebcamReady(true);
       toast.success(`Camera connected: ${track.label || "camera"}`);
@@ -1038,6 +1045,8 @@ export default function Compositor() {
     webcamStreamRef.current = null;
     setWebcamReady(false);
     setWebcamMeta("");
+    setActiveCameraLabel("");
+    setActiveMicLabel("");
   }, []);
 
   const handleCameraSourceChange = useCallback(async (event: ChangeEvent<HTMLSelectElement>) => {
@@ -1060,6 +1069,7 @@ export default function Compositor() {
         track.stop();
       });
       setWebcamMeta((previous) => previous.replace(" · mic live", ""));
+      setActiveMicLabel("None");
       await rebuildAudioMixer();
       toast.success("Microphone disabled");
       return;
@@ -1086,6 +1096,7 @@ export default function Compositor() {
       });
       activeStream.addTrack(nextTrack);
       setWebcamMeta((previous) => (previous.includes(" · mic live") ? previous : `${previous} · mic live`));
+      setActiveMicLabel(nextTrack.label || "Mic");
       await rebuildAudioMixer();
       toast.success(`Mic switched: ${nextTrack.label || "default"}`);
     } catch (error) {
@@ -1651,20 +1662,6 @@ export default function Compositor() {
           else drawWebcamRaw();
         }
       }
-
-
-      // cinematic vignette
-      if (cinematicRef.current) {
-        const vg = ctx.createRadialGradient(
-          CANVAS_W / 2, CANVAS_H / 2, CANVAS_H * 0.4,
-          CANVAS_W / 2, CANVAS_H / 2, CANVAS_H * 0.85,
-        );
-        vg.addColorStop(0, "rgba(0,0,0,0)");
-        vg.addColorStop(1, "rgba(0,0,0,0.55)");
-        ctx.fillStyle = vg;
-        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-      }
-
       // BRB overlay
       if (brbActive) {
         ctx.save();
@@ -3082,6 +3079,11 @@ http.createServer((req, res) => {
                   </option>
                 ))}
               </select>
+              {selectedCameraDeviceId === "" && activeCameraLabel && (
+                <span className="max-w-[180px] truncate text-[10px] text-emerald-300" title={`Auto using ${activeCameraLabel}`}>
+                  {"auto -> "}{activeCameraLabel}
+                </span>
+              )}
             </label>
             <label className="flex items-center gap-2 rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[11px] text-white/85">
               <span>Mic</span>
@@ -3099,6 +3101,11 @@ http.createServer((req, res) => {
                   </option>
                 ))}
               </select>
+              {selectedMicDeviceId === "" && activeMicLabel && (
+                <span className="max-w-[180px] truncate text-[10px] text-emerald-300" title={`Auto using ${activeMicLabel}`}>
+                  {"auto -> "}{activeMicLabel}
+                </span>
+              )}
             </label>
             <button
               onClick={recording ? stopRecording : startRecording}
