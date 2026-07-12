@@ -2,14 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImageSegmenter, FilesetResolver, type MPMask } from "@mediapipe/tasks-vision";
 import JSZip from "jszip";
 import { Crop, Download, Eye, EyeOff, FileText, ImageIcon, LayoutPanelTop, PanelsTopLeft } from "lucide-react";
+import { AspectRatioSelector } from "@/components/AspectRatioSelector";
 import { TeleprompterEditor } from "@/components/TeleprompterEditor";
 import { LogoUploader } from "@/components/LogoUploader";
+import { OverlayEditor } from "@/components/OverlayEditor";
+import { RecordingsGallery } from "@/components/RecordingsGallery";
+import { SoundEffectsBoard } from "@/components/SoundEffectsBoard";
+import { VideoPlayerModal } from "@/components/VideoPlayerModal";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useAspectRatio } from "@/hooks/useAspectRatio";
 import { useLogo } from "@/hooks/useLogo";
+import { useOverlays } from "@/hooks/useOverlays";
+import { useRecordings } from "@/hooks/useRecordings";
 import { useTeleprompter } from "@/hooks/useTeleprompter";
 import { defaultLocalCaptureConfig, generateLocalCaptureFiles, generateLocalCaptureSetup, type LocalCaptureConfig } from "@/lib/localCaptureKit";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import type { Recording } from "@/hooks/useRecorder";
 
 type Transform = {
   x: number;
@@ -137,8 +146,11 @@ const normalizeCaptureConfig = (config: LocalCaptureConfig): LocalCaptureConfig 
 
 export default function Compositor() {
   const navigate = useNavigate();
+  const { aspectRatio, currentConfig, changeAspectRatio } = useAspectRatio();
   const teleprompter = useTeleprompter();
   const logo = useLogo();
+  const overlays = useOverlays();
+  const { recordings, addRecording, deleteRecording, downloadRecording, shareRecording } = useRecordings();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -148,6 +160,7 @@ export default function Compositor() {
   const rafRef = useRef<number | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const recElapsedRef = useRef(0);
 
   const screenT = useRef<Transform>(defaultScreen);
   const webcamT = useRef<Transform>(defaultWebcam);
@@ -162,6 +175,7 @@ export default function Compositor() {
   const [recording, setRecording] = useState(false);
   const [recStart, setRecStart] = useState<number | null>(null);
   const [recElapsed, setRecElapsed] = useState(0);
+  recElapsedRef.current = recElapsed;
   const [shadow, setShadow] = useState(true);
   const [rounded, setRounded] = useState(true);
   const [roundedRadius, setRoundedRadius] = useState(28);
@@ -259,6 +273,11 @@ export default function Compositor() {
   const [showCreatorTools, setShowCreatorTools] = useState(false);
   const [showTeleprompterEditor, setShowTeleprompterEditor] = useState(false);
   const [showLogoUploader, setShowLogoUploader] = useState(false);
+  const [showAspectRatio, setShowAspectRatio] = useState(false);
+  const [showOverlayEditor, setShowOverlayEditor] = useState(false);
+  const [showGallery, setShowGallery] = useState(false);
+  const [showSoundEffects, setShowSoundEffects] = useState(false);
+  const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
   const [captureConfig, setCaptureConfig] = useState<LocalCaptureConfig>(() => {
     try {
       const raw = localStorage.getItem(CAPTURE_KIT_KEY);
@@ -740,6 +759,45 @@ export default function Compositor() {
     ctx.restore();
   };
 
+  const drawSocialOverlay = (ctx: CanvasRenderingContext2D) => {
+    const visibleLinks = overlays.settings.socialLinks.filter((link) => link.visible && link.handle.trim());
+    if (!visibleLinks.length) return;
+
+    const positionY = overlays.settings.position === "top" ? 36 : CANVAS_H - 112;
+    const pillHeight = 52;
+    const gap = 18;
+    const font = "600 28px Inter, system-ui, sans-serif";
+    ctx.save();
+    ctx.font = font;
+
+    const labels = visibleLinks.map((link) => {
+      const prefix = link.platform === "cashapp" ? "$" : "@";
+      return `${prefix}${link.handle.replace(/^[@$]/, "")}`;
+    });
+    const widths = labels.map((label) => Math.max(160, ctx.measureText(label).width + 74));
+    const totalWidth = widths.reduce((sum, width) => sum + width, 0) + gap * (widths.length - 1);
+    let x = (CANVAS_W - totalWidth) / 2;
+
+    visibleLinks.forEach((link, index) => {
+      const width = widths[index];
+      const label = labels[index];
+      if (overlays.settings.showBackground) {
+        ctx.fillStyle = overlays.settings.backgroundColor || "rgba(0,0,0,0.7)";
+        roundRect(ctx, x, positionY, width, pillHeight, 18);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = overlays.settings.textColor || "#ffffff";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(link.platform === "custom" ? "LINK" : link.platform.toUpperCase(), x + 18, positionY + pillHeight / 2);
+      ctx.fillText(label, x + 18 + 110, positionY + pillHeight / 2);
+      x += width + gap;
+    });
+
+    ctx.restore();
+  };
+
   const handleTeleprompterReset = () => {
     teleprompterOffsetRef.current = 0;
     teleprompter.resetScroll();
@@ -1040,6 +1098,7 @@ export default function Compositor() {
       }
 
       if (!brbActive) {
+        drawSocialOverlay(ctx);
         drawTeleprompter(ctx, dt);
       }
       drawLogoOverlay(ctx);
@@ -1050,7 +1109,7 @@ export default function Compositor() {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [shadow, rounded, roundedRadius, bgTone, order, autoQuality, screenPaused, webcamPaused, brbActive, brbText, brbSubtext, teleprompter, logo.config]);
+  }, [shadow, rounded, roundedRadius, bgTone, order, autoQuality, screenPaused, webcamPaused, brbActive, brbText, brbSubtext, teleprompter, logo.config, overlays.settings]);
 
   // recording timer
   useEffect(() => {
@@ -1350,18 +1409,22 @@ http.createServer((req, res) => {
     rec.onstop = () => {
       const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `parallax-${Date.now()}.webm`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const recording: Recording = {
+        id: `parallax-${Date.now()}`,
+        blob,
+        url,
+        duration: Math.floor(recElapsedRef.current / 1000),
+        createdAt: new Date(),
+      };
+      addRecording(recording);
+      toast.success("Recording saved to gallery");
     };
     rec.start(1000);
     recorderRef.current = rec;
     setRecording(true);
     setRecStart(Date.now());
     setRecElapsed(0);
-  }, []);
+  }, [addRecording]);
 
   const stopRecording = useCallback(() => {
     recorderRef.current?.stop();
@@ -1702,6 +1765,12 @@ http.createServer((req, res) => {
           >
             Studio Drawer
           </button>
+          <button
+            onClick={() => setShowGallery(true)}
+            className="rounded-xl border border-border bg-card px-3 py-2 text-foreground transition hover:bg-accent hover:text-accent-foreground"
+          >
+            Library {recordings.length > 0 ? `(${recordings.length})` : ""}
+          </button>
           <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-muted">
             <span className={`w-2 h-2 rounded-full ${fpsColor}`} />
             <span className="tabular-nums">{fps} fps</span>
@@ -1801,6 +1870,12 @@ http.createServer((req, res) => {
                 >
                   Open Studio Drawer
                 </button>
+                <button
+                  onClick={() => setShowGallery(true)}
+                  className="rounded-xl bg-card px-3 py-2 text-sm transition hover:bg-accent"
+                >
+                  Library {recordings.length > 0 ? `(${recordings.length})` : ""}
+                </button>
                 <div className="ml-auto text-[11px] text-muted-foreground">
                   {screenReady ? "Screen ready" : "Screen idle"} · {webcamReady ? "Cam ready" : "Cam idle"}
                 </div>
@@ -1828,6 +1903,16 @@ http.createServer((req, res) => {
                         bottom: `${(SAFE_MARGIN / CANVAS_H) * 100}%`,
                       }}
                     />
+                    {currentConfig.ratio !== 16 / 9 && (
+                      <div
+                        className="absolute border-2 border-primary/60 rounded-[20px]"
+                        style={getFramingGuideStyle(currentConfig.ratio)}
+                      >
+                        <span className="absolute -top-6 left-0 text-[10px] uppercase tracking-[0.18em] text-primary">
+                          Frame guide · {currentConfig.label}
+                        </span>
+                      </div>
+                    )}
                     <div className="absolute left-1/2 top-0 bottom-0 border-l border-white/10" />
                     <div className="absolute top-1/2 left-0 right-0 border-t border-white/10" />
                   </div>
@@ -1878,18 +1963,12 @@ http.createServer((req, res) => {
               </section>
 
               <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Legacy Tools</p>
                     <h3 className="mt-1 text-lg font-semibold">Use the best parts, not the whole old flow</h3>
-                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Teleprompter and watermark now live inside the Parallax output. The full classic recorder is still available if you want that simpler single-camera layout.</p>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Teleprompter and watermark already live inside the Parallax output. Remaining legacy pieces still need to be ported into this drawer instead of sending you to a different page.</p>
                   </div>
-                  <button
-                    onClick={() => navigate("/classic-studio")}
-                    className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm font-medium transition hover:bg-accent"
-                  >
-                    Launch Classic Studio
-                  </button>
                 </div>
               </section>
 
@@ -1905,6 +1984,34 @@ http.createServer((req, res) => {
                   <button onClick={() => setShowTeleprompterEditor(true)} className="rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90">Edit Script</button>
                   <button onClick={() => teleprompter.toggleVisible()} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">{teleprompter.state.isVisible ? "Hide Prompt" : "Show Prompt"}</button>
                   <button onClick={handleTeleprompterReset} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Reset Scroll</button>
+                </div>
+              </section>
+
+              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-primary/10 p-3 text-primary"><LayoutPanelTop className="h-5 w-5" /></div>
+                  <div>
+                    <h3 className="text-base font-semibold">In-Flow Studio Utilities</h3>
+                    <p className="text-sm text-muted-foreground">These were living on the old page. They now stay inside Parallax so you can monitor and adjust without context-switching.</p>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <button onClick={() => setShowOverlayEditor(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
+                    <div className="font-medium">Social Overlay Editor</div>
+                    <div className="mt-1 text-xs text-muted-foreground">Edit creator handles rendered into the Parallax output.</div>
+                  </button>
+                  <button onClick={() => setShowAspectRatio(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
+                    <div className="font-medium">Framing Guide</div>
+                    <div className="mt-1 text-xs text-muted-foreground">Current guide: {currentConfig.label} · {currentConfig.description}</div>
+                  </button>
+                  <button onClick={() => setShowSoundEffects(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
+                    <div className="font-medium">Sound Effects</div>
+                    <div className="mt-1 text-xs text-muted-foreground">Play quick audience and emphasis sounds during recording.</div>
+                  </button>
+                  <button onClick={() => setShowGallery(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
+                    <div className="font-medium">Recordings Library</div>
+                    <div className="mt-1 text-xs text-muted-foreground">Review, download, share, or delete takes without leaving Parallax.</div>
+                  </button>
                 </div>
               </section>
 
@@ -2010,8 +2117,77 @@ http.createServer((req, res) => {
         onUpdateSize={logo.updateSize}
         onUpdateOpacity={logo.updateOpacity}
       />
+
+      <OverlayEditor
+        isOpen={showOverlayEditor}
+        settings={overlays.settings}
+        onClose={() => setShowOverlayEditor(false)}
+        onAddSocialLink={overlays.addSocialLink}
+        onUpdateSocialLink={overlays.updateSocialLink}
+        onRemoveSocialLink={overlays.removeSocialLink}
+        onSetPosition={overlays.setPosition}
+        onToggleBackground={overlays.toggleBackground}
+      />
+
+      <AspectRatioSelector
+        isOpen={showAspectRatio}
+        current={aspectRatio}
+        onSelect={changeAspectRatio}
+        onClose={() => setShowAspectRatio(false)}
+      />
+
+      <SoundEffectsBoard
+        isOpen={showSoundEffects}
+        onClose={() => setShowSoundEffects(false)}
+      />
+
+      <RecordingsGallery
+        isOpen={showGallery}
+        recordings={recordings}
+        onClose={() => setShowGallery(false)}
+        onPlay={(recording) => setPlayingRecording(recording)}
+        onDelete={deleteRecording}
+        onDownload={downloadRecording}
+        onShare={async (recording) => {
+          const ok = await shareRecording(recording);
+          if (!ok) toast.success("Downloaded — upload it where you want");
+        }}
+      />
+
+      <VideoPlayerModal
+        recording={playingRecording}
+        onClose={() => setPlayingRecording(null)}
+      />
     </div>
   );
+}
+
+function getFramingGuideStyle(targetRatio: number): React.CSSProperties {
+  const canvasRatio = CANVAS_W / CANVAS_H;
+  if (targetRatio > canvasRatio) {
+    const heightPercent = (canvasRatio / targetRatio) * 100;
+    const top = (100 - heightPercent) / 2;
+    return { left: "0%", right: "0%", top: `${top}%`, bottom: `${top}%` };
+  }
+
+  const widthPercent = (targetRatio / canvasRatio) * 100;
+  const left = (100 - widthPercent) / 2;
+  return { top: "0%", bottom: "0%", left: `${left}%`, right: `${left}%` };
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
 }
 
 function Slider({
