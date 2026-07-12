@@ -2448,57 +2448,56 @@ http.createServer((req, res) => {
                       </div>
                       <span className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[10px] text-muted-foreground">No hunting</span>
                     </div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                      <button
-                        onClick={togglePauseScreen}
-                        disabled={!screenReady && !screenPaused}
-                        className={`rounded-xl border px-2.5 py-2 text-left transition disabled:opacity-40 ${screenPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
-                      >
-                        <p className="text-[10px] uppercase tracking-[0.2em] opacity-75">Screen Hold</p>
-                        <p className="mt-1 text-sm font-semibold">{screenPaused ? "Resume screen" : "Pause screen"}</p>
-                        <p className="mt-1 text-[11px] opacity-75">Freeze the shared screen without opening the Command Center.</p>
-                      </button>
-                      <button
-                        onClick={togglePauseWebcam}
-                        disabled={!webcamReady && !webcamPaused}
-                        className={`rounded-xl border px-2.5 py-2 text-left transition disabled:opacity-40 ${webcamPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
-                      >
-                        <p className="text-[10px] uppercase tracking-[0.2em] opacity-75">Cam Hold</p>
-                        <p className="mt-1 text-sm font-semibold">{webcamPaused ? "Resume camera" : "Pause camera"}</p>
-                        <p className="mt-1 text-[11px] opacity-75">Freeze your camera feed in place on the canvas.</p>
-                      </button>
-                      <button
-                        onClick={toggleBrbMode}
-                        className={`rounded-xl border px-2.5 py-2 text-left transition ${brbActive ? "border-indigo-500 bg-indigo-500 text-white" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
-                      >
-                        <p className="text-[10px] uppercase tracking-[0.2em] opacity-75">Waiting Screen</p>
-                        <p className="mt-1 text-sm font-semibold">{brbActive ? "Return from BRB" : "We’ll be back"}</p>
-                        <p className="mt-1 text-[11px] opacity-75">Locks the stage and puts the waiting message up immediately.</p>
-                      </button>
-                      <button
-                        onClick={() => setShowTeleprompterEditor(true)}
-                        className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left transition hover:bg-white/[0.06]"
-                      >
-                        <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Script</p>
-                        <p className="mt-1 font-semibold text-foreground">{teleprompter.state.script.trim() ? "Edit teleprompter" : "Add teleprompter"}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{teleprompter.state.script.trim() ? (teleprompter.state.isVisible ? "Prompt is visible on stage." : "Prompt is loaded and ready.") : "Load the script without leaving the stage."}</p>
-                      </button>
-                      <button
-                        onClick={() => setShowOverlayEditor(true)}
-                        className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left transition hover:bg-white/[0.06]"
-                      >
-                        <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Overlays</p>
-                        <p className="mt-1 font-semibold text-foreground">{overlays.settings.socialLinks.some((link) => link.visible && link.handle.trim()) ? "Edit social overlays" : "Add social overlays"}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Handles and social badges should be one click away.</p>
-                      </button>
-                      <button
-                        onClick={() => setShowLogoUploader(true)}
-                        className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left transition hover:bg-white/[0.06]"
-                      >
-                        <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Logo</p>
-                        <p className="mt-1 font-semibold text-foreground">{logo.hasLogo ? "Manage watermark" : "Add watermark"}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Branding setup now stays beside the main stage controls.</p>
-                      </button>
+                    <div className="mt-3 space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={togglePauseScreen}
+                          disabled={!screenReady && !screenPaused}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${screenPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                        >
+                          {screenPaused ? "Resume Screen" : "Pause Screen"}
+                        </button>
+                        <button
+                          onClick={togglePauseWebcam}
+                          disabled={!webcamReady && !webcamPaused}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${webcamPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                        >
+                          {webcamPaused ? "Resume Cam" : "Pause Cam"}
+                        </button>
+                        <button
+                          onClick={toggleBrbMode}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${brbActive ? "border-indigo-500 bg-indigo-500 text-white" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                        >
+                          {brbActive ? "Exit BRB" : "BRB"}
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setShowTeleprompterEditor(true)}
+                          className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/[0.06]"
+                        >
+                          {teleprompter.state.script.trim() ? "Script: Edit" : "Script: Add"}
+                        </button>
+                        <button
+                          onClick={() => setShowOverlayEditor(true)}
+                          className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/[0.06]"
+                        >
+                          {overlays.settings.socialLinks.some((link) => link.visible && link.handle.trim()) ? "Overlays: Edit" : "Overlays: Add"}
+                        </button>
+                        <button
+                          onClick={() => setShowLogoUploader(true)}
+                          className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/[0.06]"
+                        >
+                          {logo.hasLogo ? "Logo: Manage" : "Logo: Add"}
+                        </button>
+                        <button
+                          onClick={quickSavePreset}
+                          className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/[0.06]"
+                        >
+                          Preset: Save
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">Compact stage actions: no card-sized pause controls, one-tap access to script, overlays, logo, and preset save.</p>
                     </div>
 
                     <div className="mt-3 grid gap-2 xl:grid-cols-2">
