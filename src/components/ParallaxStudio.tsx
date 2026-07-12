@@ -730,6 +730,39 @@ export default function Compositor() {
     else webcamFrozenRef.current = null;
     setWebcamPaused((p) => !p);
   };
+  const brbRestorePauseRef = useRef<{ screen: boolean; webcam: boolean } | null>(null);
+  const setScreenPausedState = (next: boolean) => {
+    if (next) {
+      if (!screenPaused) screenFrozenRef.current = snapshotVideo(screenVideoRef.current);
+    } else {
+      screenFrozenRef.current = null;
+    }
+    setScreenPaused(next);
+  };
+  const setWebcamPausedState = (next: boolean) => {
+    if (next) {
+      if (!webcamPaused) webcamFrozenRef.current = snapshotVideo(webcamVideoRef.current);
+    } else {
+      webcamFrozenRef.current = null;
+    }
+    setWebcamPaused(next);
+  };
+  const toggleBrbMode = () => {
+    if (!brbActive) {
+      brbRestorePauseRef.current = { screen: screenPaused, webcam: webcamPaused };
+      if (screenReady && !screenPaused) setScreenPausedState(true);
+      if (webcamReady && !webcamPaused) setWebcamPausedState(true);
+      setBrbActive(true);
+      return;
+    }
+
+    setBrbActive(false);
+    const restore = brbRestorePauseRef.current;
+    brbRestorePauseRef.current = null;
+    if (!restore) return;
+    if (restore.screen !== screenPaused) setScreenPausedState(restore.screen);
+    if (restore.webcam !== webcamPaused) setWebcamPausedState(restore.webcam);
+  };
 
   const drawTeleprompter = (ctx: CanvasRenderingContext2D, dt: number) => {
     const teleState = teleprompterStateRef.current;
@@ -1138,7 +1171,7 @@ export default function Compositor() {
       // BRB overlay
       if (brbActive) {
         ctx.save();
-        ctx.fillStyle = "rgba(4,6,14,0.88)";
+        ctx.fillStyle = "rgba(4,6,14,0.97)";
         ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
         const pulse = 0.85 + Math.sin(tSec * 2) * 0.15;
         ctx.globalAlpha = pulse;
@@ -1284,7 +1317,7 @@ export default function Compositor() {
       else if (e.key === "[") { commitTransform(selected, { ...cur, rotation: cur.rotation - (e.shiftKey ? 5 : 1) }); }
       else if (e.key === "]") { commitTransform(selected, { ...cur, rotation: cur.rotation + (e.shiftKey ? 5 : 1) }); }
       else if (e.key === "Tab") { setSelected((s) => (s === "screen" ? "webcam" : "screen")); e.preventDefault(); }
-      else if (e.key === "b" || e.key === "B") { setBrbActive((v) => !v); e.preventDefault(); }
+      else if (e.key === "b" || e.key === "B") { toggleBrbMode(); e.preventDefault(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1663,13 +1696,14 @@ http.createServer((req, res) => {
       <section className={`${sectionClassName} space-y-2`}>
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">BRB / Waiting Screen</h2>
         <button
-          onClick={() => setBrbActive((v) => !v)}
+          onClick={toggleBrbMode}
           className={`w-full text-sm rounded-md px-3 py-2 border transition ${
             brbActive ? "bg-indigo-500 text-white border-indigo-500 animate-pulse" : "bg-card hover:bg-accent border-border"
           }`}
         >
           {brbActive ? "Hide waiting overlay" : "Show \"We'll be back\" overlay"}
         </button>
+        <p className="text-[10px] text-muted-foreground">BRB now freezes active sources while the waiting screen is up, then restores the previous pause state when you come back.</p>
         <input value={brbText} onChange={(e) => setBrbText(e.target.value)} placeholder="Headline" className="w-full bg-input rounded px-2 py-1 border border-border text-xs" />
         <input value={brbSubtext} onChange={(e) => setBrbSubtext(e.target.value)} placeholder="Subtext" className="w-full bg-input rounded px-2 py-1 border border-border text-xs" />
       </section>
@@ -2037,6 +2071,68 @@ http.createServer((req, res) => {
                     <button onClick={() => setShowCreatorTools(true)} className="rounded-full border border-white/10 bg-black/25 px-4 py-2 font-semibold transition hover:bg-white/[0.06]">Open Command Center</button>
                     <button onClick={() => setShowGallery(true)} className="rounded-full border border-white/10 bg-black/25 px-4 py-2 font-semibold transition hover:bg-white/[0.06]">Open Library</button>
                     <span className="rounded-full border border-white/10 bg-black/25 px-3 py-2 text-muted-foreground">Live path: {streamSummary}</span>
+                  </div>
+
+                  <div className="mt-4 rounded-[24px] border border-white/10 bg-black/20 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary/80">Essential Controls</p>
+                        <p className="mt-1 text-xs text-muted-foreground">The actions you called out are now on the stage path instead of buried in the secondary panel.</p>
+                      </div>
+                      <span className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[10px] text-muted-foreground">No hunting</span>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      <button
+                        onClick={togglePauseScreen}
+                        disabled={!screenReady && !screenPaused}
+                        className={`rounded-2xl border px-3 py-3 text-left transition disabled:opacity-40 ${screenPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                      >
+                        <p className="text-[11px] uppercase tracking-[0.22em] opacity-75">Screen Hold</p>
+                        <p className="mt-1 font-semibold">{screenPaused ? "Resume screen" : "Pause screen"}</p>
+                        <p className="mt-1 text-xs opacity-75">Freeze the shared screen without opening the Command Center.</p>
+                      </button>
+                      <button
+                        onClick={togglePauseWebcam}
+                        disabled={!webcamReady && !webcamPaused}
+                        className={`rounded-2xl border px-3 py-3 text-left transition disabled:opacity-40 ${webcamPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                      >
+                        <p className="text-[11px] uppercase tracking-[0.22em] opacity-75">Cam Hold</p>
+                        <p className="mt-1 font-semibold">{webcamPaused ? "Resume camera" : "Pause camera"}</p>
+                        <p className="mt-1 text-xs opacity-75">Freeze your camera feed in place on the canvas.</p>
+                      </button>
+                      <button
+                        onClick={toggleBrbMode}
+                        className={`rounded-2xl border px-3 py-3 text-left transition ${brbActive ? "border-indigo-500 bg-indigo-500 text-white" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                      >
+                        <p className="text-[11px] uppercase tracking-[0.22em] opacity-75">Waiting Screen</p>
+                        <p className="mt-1 font-semibold">{brbActive ? "Return from BRB" : "We’ll be back"}</p>
+                        <p className="mt-1 text-xs opacity-75">Locks the stage and puts the waiting message up immediately.</p>
+                      </button>
+                      <button
+                        onClick={() => setShowTeleprompterEditor(true)}
+                        className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left transition hover:bg-white/[0.06]"
+                      >
+                        <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Script</p>
+                        <p className="mt-1 font-semibold text-foreground">{teleprompter.state.script.trim() ? "Edit teleprompter" : "Add teleprompter"}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{teleprompter.state.script.trim() ? (teleprompter.state.isVisible ? "Prompt is visible on stage." : "Prompt is loaded and ready.") : "Load the script without leaving the stage."}</p>
+                      </button>
+                      <button
+                        onClick={() => setShowOverlayEditor(true)}
+                        className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left transition hover:bg-white/[0.06]"
+                      >
+                        <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Overlays</p>
+                        <p className="mt-1 font-semibold text-foreground">{overlays.settings.socialLinks.some((link) => link.visible && link.handle.trim()) ? "Edit social overlays" : "Add social overlays"}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Handles and social badges should be one click away.</p>
+                      </button>
+                      <button
+                        onClick={() => setShowLogoUploader(true)}
+                        className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left transition hover:bg-white/[0.06]"
+                      >
+                        <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Logo</p>
+                        <p className="mt-1 font-semibold text-foreground">{logo.hasLogo ? "Manage watermark" : "Add watermark"}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Branding setup now stays beside the main stage controls.</p>
+                      </button>
+                    </div>
                   </div>
 
                   {needsQuickStart && (
