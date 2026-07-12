@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ImageSegmenter, FilesetResolver, type MPMask } from "@mediapipe/tasks-vision";
 import { Crop, Download, Eye, EyeOff, FileText, ImageIcon, LayoutPanelTop, PanelsTopLeft } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -80,6 +80,7 @@ const TEMPLATES_SEEDED_KEY = "parallax-studio.templates.seeded.v1";
 const CAPTURE_KIT_KEY = "parallax-studio.capture-kit.v1";
 const KICK_RTMPS_URL = "rtmps://fa723fc1b171.global-contribute.live-video.net/app/";
 const QUICK_START_DISMISSED_KEY = "scriptcam.quick-start.dismissed.v1";
+const AUDIO_MIX_KEY = "scriptcam.audio-mix.v1";
 
 const RECORDING_QUALITY_BITS_PER_PIXEL: Record<RecordingQualityPreset, number> = {
   balanced: 0.09,
@@ -246,6 +247,55 @@ export default function Compositor() {
   const [brbActive, setBrbActive] = useState(false);
   const [brbText, setBrbText] = useState("BE RIGHT BACK");
   const [brbSubtext, setBrbSubtext] = useState("Grabbing coffee — back in a moment");
+  const [micMuted, setMicMuted] = useState(() => {
+    try {
+      const raw = localStorage.getItem(AUDIO_MIX_KEY);
+      return raw ? Boolean(JSON.parse(raw).micMuted) : false;
+    } catch {
+      return false;
+    }
+  });
+  const [screenAudioMuted, setScreenAudioMuted] = useState(() => {
+    try {
+      const raw = localStorage.getItem(AUDIO_MIX_KEY);
+      return raw ? Boolean(JSON.parse(raw).screenAudioMuted) : false;
+    } catch {
+      return false;
+    }
+  });
+  const [micVolume, setMicVolume] = useState(() => {
+    try {
+      const raw = localStorage.getItem(AUDIO_MIX_KEY);
+      const value = raw ? Number(JSON.parse(raw).micVolume) : 100;
+      return Number.isFinite(value) ? value : 100;
+    } catch {
+      return 100;
+    }
+  });
+  const [screenAudioVolume, setScreenAudioVolume] = useState(() => {
+    try {
+      const raw = localStorage.getItem(AUDIO_MIX_KEY);
+      const value = raw ? Number(JSON.parse(raw).screenAudioVolume) : 100;
+      return Number.isFinite(value) ? value : 100;
+    } catch {
+      return 100;
+    }
+  });
+  const [micAudioAvailable, setMicAudioAvailable] = useState(false);
+  const [screenAudioAvailable, setScreenAudioAvailable] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+  const [screenAudioLevel, setScreenAudioLevel] = useState(0);
+  const [screenAudioSmokeTesting, setScreenAudioSmokeTesting] = useState(false);
+  const [screenAudioSmokeStatus, setScreenAudioSmokeStatus] = useState<string>("");
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const screenAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const micGainRef = useRef<GainNode | null>(null);
+  const screenAudioGainRef = useRef<GainNode | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const screenAudioAnalyserRef = useRef<AnalyserNode | null>(null);
+  const mixedAudioInputsRef = useRef(0);
 
   // Cinematic
   const [cinematic, setCinematic] = useState(true);
@@ -350,6 +400,14 @@ export default function Compositor() {
   useEffect(() => { localStorage.setItem("parallax.streamFps", String(streamFps)); }, [streamFps]);
   useEffect(() => { localStorage.setItem("parallax.recordingQuality", recordingQualityPreset); }, [recordingQualityPreset]);
   useEffect(() => { localStorage.setItem(QUICK_START_DISMISSED_KEY, quickStartDismissed ? "1" : "0"); }, [quickStartDismissed]);
+  useEffect(() => {
+    localStorage.setItem(AUDIO_MIX_KEY, JSON.stringify({
+      micMuted,
+      screenAudioMuted,
+      micVolume,
+      screenAudioVolume,
+    }));
+  }, [micMuted, screenAudioMuted, micVolume, screenAudioVolume]);
 
   useEffect(() => {
     teleprompterOffsetRef.current = 0;
@@ -417,6 +475,217 @@ export default function Compositor() {
       v.autoplay = true;
       v.playsInline = true;
       webcamVideoRef.current = v;
+    }
+  }, []);
+
+  const ensureAudioMixer = useCallback(() => {
+    if (audioContextRef.current && audioDestinationRef.current) {
+      return { context: audioContextRef.current, destination: audioDestinationRef.current };
+    }
+
+    const AudioContextCtor = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return null;
+
+    const context = new AudioContextCtor();
+    const destination = context.createMediaStreamDestination();
+    audioContextRef.current = context;
+    audioDestinationRef.current = destination;
+    return { context, destination };
+  }, []);
+
+  const rebuildAudioMixer = useCallback(async () => {
+    const mixer = ensureAudioMixer();
+    if (!mixer) {
+      mixedAudioInputsRef.current = 0;
+      setMicAudioAvailable(false);
+      setScreenAudioAvailable(false);
+      return;
+    }
+
+    const { context, destination } = mixer;
+    if (context.state === "suspended") {
+      try {
+        await context.resume();
+      } catch {
+        // Ignore resume failures until the next user gesture.
+      }
+    }
+
+    micSourceRef.current?.disconnect();
+    screenAudioSourceRef.current?.disconnect();
+    micGainRef.current?.disconnect();
+    screenAudioGainRef.current?.disconnect();
+    micAnalyserRef.current?.disconnect();
+    screenAudioAnalyserRef.current?.disconnect();
+    micSourceRef.current = null;
+    screenAudioSourceRef.current = null;
+    micGainRef.current = null;
+    screenAudioGainRef.current = null;
+    micAnalyserRef.current = null;
+    screenAudioAnalyserRef.current = null;
+
+    let inputs = 0;
+    const micTracks = webcamStreamRef.current?.getAudioTracks() ?? [];
+    const screenTracks = screenStreamRef.current?.getAudioTracks() ?? [];
+
+    setMicAudioAvailable(micTracks.length > 0);
+    setScreenAudioAvailable(screenTracks.length > 0);
+
+    if (micTracks.length > 0) {
+      const micStream = new MediaStream(micTracks);
+      const micSource = context.createMediaStreamSource(micStream);
+      const micGain = context.createGain();
+      const micAnalyser = context.createAnalyser();
+      micAnalyser.fftSize = 512;
+      micGain.gain.value = micMuted ? 0 : micVolume / 100;
+      micSource.connect(micGain);
+      micGain.connect(destination);
+      micGain.connect(micAnalyser);
+      micSourceRef.current = micSource;
+      micGainRef.current = micGain;
+      micAnalyserRef.current = micAnalyser;
+      inputs += 1;
+    }
+
+    if (screenTracks.length > 0) {
+      const screenAudioStream = new MediaStream(screenTracks);
+      const screenSource = context.createMediaStreamSource(screenAudioStream);
+      const screenGain = context.createGain();
+      const screenAnalyser = context.createAnalyser();
+      screenAnalyser.fftSize = 512;
+      screenGain.gain.value = screenAudioMuted ? 0 : screenAudioVolume / 100;
+      screenSource.connect(screenGain);
+      screenGain.connect(destination);
+      screenGain.connect(screenAnalyser);
+      screenAudioSourceRef.current = screenSource;
+      screenAudioGainRef.current = screenGain;
+      screenAudioAnalyserRef.current = screenAnalyser;
+      inputs += 1;
+    }
+
+    mixedAudioInputsRef.current = inputs;
+  }, [ensureAudioMixer, micMuted, micVolume, screenAudioMuted, screenAudioVolume]);
+
+  const appendMixedAudioTracks = useCallback((stream: MediaStream) => {
+    if (mixedAudioInputsRef.current < 1) return;
+    const track = audioDestinationRef.current?.stream.getAudioTracks()[0];
+    if (track) stream.addTrack(track);
+  }, []);
+
+  useEffect(() => {
+    void rebuildAudioMixer();
+  }, [rebuildAudioMixer, screenReady, webcamReady]);
+
+  useEffect(() => {
+    let raf = 0;
+    const sampleLevel = (analyser: AnalyserNode | null) => {
+      if (!analyser) return 0;
+      const data = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(data);
+      let peak = 0;
+      for (let index = 0; index < data.length; index += 1) {
+        const normalized = Math.abs((data[index] - 128) / 128);
+        if (normalized > peak) peak = normalized;
+      }
+      return Math.min(1, peak * 1.8);
+    };
+
+    const tick = () => {
+      setMicLevel(sampleLevel(micAnalyserRef.current));
+      setScreenAudioLevel(sampleLevel(screenAudioAnalyserRef.current));
+      raf = window.requestAnimationFrame(tick);
+    };
+
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
+
+  const runScreenAudioSmokeTest = useCallback(async () => {
+    if (!window.isSecureContext) {
+      setScreenAudioSmokeStatus("Smoke test requires a secure context. Open the studio on localhost or HTTPS.");
+      return;
+    }
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setScreenAudioSmokeStatus("This browser does not support screen capture via getDisplayMedia.");
+      return;
+    }
+
+    setScreenAudioSmokeTesting(true);
+    setScreenAudioSmokeStatus("Share a tab or window with audio already playing. The studio will inspect the returned stream and stop it immediately.");
+
+    let stream: MediaStream | null = null;
+    let testContext: AudioContext | null = null;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+      });
+
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        setScreenAudioSmokeStatus("No screen-audio track came back. In Chromium this usually means the chosen source did not expose audio or the browser only supports tab audio for that source.");
+        return;
+      }
+
+      const AudioContextCtor = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) {
+        setScreenAudioSmokeStatus(`Screen audio track detected: ${audioTracks[0].label || "unnamed source"}. This browser does not expose AudioContext analysis, so availability is confirmed but live level probing is skipped.`);
+        return;
+      }
+
+      testContext = new AudioContextCtor();
+      if (testContext.state === "suspended") {
+        try {
+          await testContext.resume();
+        } catch {
+          // Continue; some browsers will still allow graph inspection.
+        }
+      }
+
+      const analyser = testContext.createAnalyser();
+      analyser.fftSize = 512;
+      const source = testContext.createMediaStreamSource(new MediaStream(audioTracks));
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.fftSize);
+      const deadline = performance.now() + 1800;
+      let peak = 0;
+
+      await new Promise<void>((resolve) => {
+        const tick = () => {
+          analyser.getByteTimeDomainData(data);
+          for (let index = 0; index < data.length; index += 1) {
+            const normalized = Math.abs((data[index] - 128) / 128);
+            if (normalized > peak) peak = normalized;
+          }
+
+          if (performance.now() >= deadline) {
+            resolve();
+            return;
+          }
+          window.requestAnimationFrame(tick);
+        };
+
+        window.requestAnimationFrame(tick);
+      });
+
+      const percent = Math.round(Math.min(1, peak * 1.8) * 100);
+      setScreenAudioSmokeStatus(
+        percent > 3
+          ? `Screen audio detected from ${audioTracks[0].label || "the shared source"}. Peak activity reached ${percent}%, so the browser/source combination is passing audio into capture.`
+          : `A screen-audio track was returned from ${audioTracks[0].label || "the shared source"}, but activity stayed near silence. If sound was playing, the browser likely exposed a silent track or the chosen source was not the actual audio source.`,
+      );
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "NotAllowedError") {
+        setScreenAudioSmokeStatus("Smoke test cancelled or blocked by permission settings. Re-run and allow screen sharing.");
+      } else if (error instanceof DOMException && error.name === "NotFoundError") {
+        setScreenAudioSmokeStatus("No shareable screen source was found by the browser.");
+      } else {
+        setScreenAudioSmokeStatus(`Smoke test failed: ${error instanceof Error ? error.message : "capture failed"}`);
+      }
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
+      void testContext?.close();
+      setScreenAudioSmokeTesting(false);
     }
   }, []);
 
@@ -555,7 +824,7 @@ export default function Compositor() {
       setError(null);
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: 60 },
-        audio: false,
+        audio: true,
       });
       screenStreamRef.current = stream;
       const v = screenVideoRef.current!;
@@ -563,7 +832,8 @@ export default function Compositor() {
       await v.play();
       const track = stream.getVideoTracks()[0];
       const s = track.getSettings();
-      setScreenMeta(`${track.label || "screen"} · ${s.width ?? "?"}×${s.height ?? "?"}`);
+      const hasSharedAudio = stream.getAudioTracks().length > 0;
+      setScreenMeta(`${track.label || "screen"} · ${s.width ?? "?"}×${s.height ?? "?"}${hasSharedAudio ? " · system audio" : ""}`);
       track.addEventListener("ended", () => {
         setScreenReady(false);
         setScreenMeta("");
@@ -593,7 +863,8 @@ export default function Compositor() {
       await v.play();
       const track = stream.getVideoTracks()[0];
       const s = track.getSettings();
-      setWebcamMeta(`${track.label || "camera"} · ${s.width ?? "?"}×${s.height ?? "?"}`);
+      const hasMic = stream.getAudioTracks().length > 0;
+      setWebcamMeta(`${track.label || "camera"} · ${s.width ?? "?"}×${s.height ?? "?"}${hasMic ? " · mic live" : ""}`);
       track.addEventListener("ended", () => {
         setWebcamReady(false);
         setWebcamMeta("");
@@ -1008,6 +1279,16 @@ export default function Compositor() {
       const qs = QUALITY_SETTINGS[qualityRef.current];
       const tSec = now / 1000;
 
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.filter = "none";
+      ctx.shadowColor = "rgba(0,0,0,0)";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+
       // background
       const bgImg = customBgImgRef.current;
       if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
@@ -1348,7 +1629,7 @@ export default function Compositor() {
     const canvas = canvasRef.current;
     if (!canvas) { setStreamStatus("Canvas not ready"); return; }
     const stream = canvas.captureStream(streamFps);
-    webcamStreamRef.current?.getAudioTracks().forEach((t) => stream.addTrack(t));
+    appendMixedAudioTracks(stream);
     const mime = getPreferredRecorderMimeType(["video/webm;codecs=vp8,opus", "video/webm"]);
     let rec: MediaRecorder;
     try {
@@ -1417,7 +1698,7 @@ export default function Compositor() {
       streamRecRef.current = null;
       streamAbortRef.current = null;
     }
-  }, [streamUrl, streamKey, streamBitrate, streamFps, streamKeyframe, bridgePort]);
+  }, [appendMixedAudioTracks, streamUrl, streamKey, streamBitrate, streamFps, streamKeyframe, bridgePort]);
 
   const stopStream = useCallback(() => {
     try { streamRecRef.current?.stop(); } catch {}
@@ -1502,7 +1783,7 @@ http.createServer((req, res) => {
     if (!canvas) return;
     const recordingProfile = getRecordingProfile(CANVAS_W, CANVAS_H, 60, recordingQualityPreset);
     const stream = canvas.captureStream(recordingProfile.fps);
-    webcamStreamRef.current?.getAudioTracks().forEach((t) => stream.addTrack(t));
+    appendMixedAudioTracks(stream);
     const rec = new MediaRecorder(stream, {
       ...(recordingProfile.mimeType ? { mimeType: recordingProfile.mimeType } : {}),
       videoBitsPerSecond: recordingProfile.videoBitsPerSecond,
@@ -1528,7 +1809,7 @@ http.createServer((req, res) => {
     setRecording(true);
     setRecStart(Date.now());
     setRecElapsed(0);
-  }, [addRecording, recordingQualityPreset]);
+  }, [addRecording, appendMixedAudioTracks, recordingQualityPreset]);
 
   const stopRecording = useCallback(() => {
     recorderRef.current?.stop();
@@ -1541,6 +1822,11 @@ http.createServer((req, res) => {
     screenStreamRef.current?.getTracks().forEach((t) => t.stop());
     webcamStreamRef.current?.getTracks().forEach((t) => t.stop());
     recorderRef.current?.stop();
+    micSourceRef.current?.disconnect();
+    screenAudioSourceRef.current?.disconnect();
+    micGainRef.current?.disconnect();
+    screenAudioGainRef.current?.disconnect();
+    void audioContextRef.current?.close();
   }, []);
 
   const layer = selected === "screen" ? screenState : webcamState;
@@ -1567,6 +1853,13 @@ http.createServer((req, res) => {
     };
     persistPresets([preset, ...presets]);
     setPresetName("");
+    toast.success(`Saved preset: ${name}`);
+  };
+  const quickSavePreset = () => {
+    if (!presetName.trim()) {
+      setPresetName(`Scene ${presets.length + 1}`);
+    }
+    savePreset();
   };
   const loadPreset = (p: Preset) => {
     commitTransform("screen", p.screen);
@@ -1587,17 +1880,23 @@ http.createServer((req, res) => {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  const importPresets = (file: File) => {
+  const importPresets = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const data = JSON.parse(String(reader.result));
-        if (Array.isArray(data)) persistPresets([...data, ...presets]);
+        if (Array.isArray(data)) {
+          persistPresets([...data, ...presets]);
+          toast.success(`Imported ${data.length} presets`);
+        }
       } catch {
         setError("Preset import failed: invalid JSON");
       }
     };
     reader.readAsText(file);
+    event.target.value = "";
   };
 
   const fpsState: "good" | "warn" | "bad" =
@@ -1799,6 +2098,73 @@ http.createServer((req, res) => {
           Kick test flow: download and run the local bridge, paste your Kick stream key, then start studio streaming from this panel.
         </p>
         <p className="text-[10px] text-muted-foreground">Live target: {CANVAS_W}×{CANVAS_H} · {streamFps}fps · {(streamBitrate / 1000).toFixed(1)} Mbps to bridge</p>
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Audio Mix</h2>
+          <span className="text-[10px] text-muted-foreground">Recorder + Live bus</span>
+        </div>
+        <div className="space-y-2 rounded-lg border border-border bg-card/60 p-2">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-medium">Microphone</p>
+              <p className="text-[10px] text-muted-foreground">{micAudioAvailable ? "Webcam mic is in the mix." : "No mic track detected from the camera source."}</p>
+            </div>
+            <button
+              onClick={() => setMicMuted((value) => !value)}
+              disabled={!micAudioAvailable}
+              className={`rounded-md border px-2 py-1 text-[11px] transition disabled:opacity-40 ${micMuted ? "border-amber-500 bg-amber-500 text-black" : "border-border bg-background hover:bg-accent"}`}
+            >
+              {micMuted ? "Muted" : "Live"}
+            </button>
+          </div>
+          <div className="space-y-1">
+            <div className="h-2 overflow-hidden rounded-full bg-muted/60">
+              <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-100" style={{ width: `${Math.round(micLevel * 100)}%` }} />
+            </div>
+            <p className="text-[10px] text-muted-foreground">Input meter: {Math.round(micLevel * 100)}%</p>
+          </div>
+          <Slider label="Mic level" value={micVolume} min={0} max={150} step={1} suffix="%" onChange={setMicVolume} />
+        </div>
+        <div className="space-y-2 rounded-lg border border-border bg-card/60 p-2">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-medium">Shared screen audio</p>
+              <p className="text-[10px] text-muted-foreground">{screenAudioAvailable ? "System or tab audio is feeding the mix." : "Share a tab/window with audio enabled to bring it in."}</p>
+            </div>
+            <button
+              onClick={() => setScreenAudioMuted((value) => !value)}
+              disabled={!screenAudioAvailable}
+              className={`rounded-md border px-2 py-1 text-[11px] transition disabled:opacity-40 ${screenAudioMuted ? "border-amber-500 bg-amber-500 text-black" : "border-border bg-background hover:bg-accent"}`}
+            >
+              {screenAudioMuted ? "Muted" : "Live"}
+            </button>
+          </div>
+          <div className="space-y-1">
+            <div className="h-2 overflow-hidden rounded-full bg-muted/60">
+              <div className="h-full rounded-full bg-sky-500 transition-[width] duration-100" style={{ width: `${Math.round(screenAudioLevel * 100)}%` }} />
+            </div>
+            <p className="text-[10px] text-muted-foreground">Input meter: {Math.round(screenAudioLevel * 100)}%</p>
+          </div>
+          <Slider label="Screen audio level" value={screenAudioVolume} min={0} max={150} step={1} suffix="%" onChange={setScreenAudioVolume} />
+        </div>
+        <div className="rounded-lg border border-border bg-card/60 p-2">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-medium">Browser smoke test</p>
+              <p className="text-[10px] text-muted-foreground">Checks whether your browser returns a real screen-audio track with measurable activity.</p>
+            </div>
+            <button
+              onClick={runScreenAudioSmokeTest}
+              disabled={screenAudioSmokeTesting}
+              className="rounded-md border border-border bg-background px-2 py-1 text-[11px] transition hover:bg-accent disabled:opacity-40"
+            >
+              {screenAudioSmokeTesting ? "Testing…" : "Run test"}
+            </button>
+          </div>
+          {screenAudioSmokeStatus && <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">{screenAudioSmokeStatus}</p>}
+        </div>
       </section>
 
       <section className={`${sectionClassName} space-y-2`}>
@@ -2070,6 +2436,7 @@ http.createServer((req, res) => {
                     </button>
                     <button onClick={() => setShowCreatorTools(true)} className="rounded-full border border-white/10 bg-black/25 px-4 py-2 font-semibold transition hover:bg-white/[0.06]">Open Command Center</button>
                     <button onClick={() => setShowGallery(true)} className="rounded-full border border-white/10 bg-black/25 px-4 py-2 font-semibold transition hover:bg-white/[0.06]">Open Library</button>
+                    <button onClick={quickSavePreset} className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 font-semibold transition hover:bg-white/[0.06]">Save Preset</button>
                     <span className="rounded-full border border-white/10 bg-black/25 px-3 py-2 text-muted-foreground">Live path: {streamSummary}</span>
                   </div>
 
@@ -2085,28 +2452,28 @@ http.createServer((req, res) => {
                       <button
                         onClick={togglePauseScreen}
                         disabled={!screenReady && !screenPaused}
-                        className={`rounded-2xl border px-3 py-3 text-left transition disabled:opacity-40 ${screenPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                        className={`rounded-xl border px-2.5 py-2 text-left transition disabled:opacity-40 ${screenPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
                       >
-                        <p className="text-[11px] uppercase tracking-[0.22em] opacity-75">Screen Hold</p>
-                        <p className="mt-1 font-semibold">{screenPaused ? "Resume screen" : "Pause screen"}</p>
-                        <p className="mt-1 text-xs opacity-75">Freeze the shared screen without opening the Command Center.</p>
+                        <p className="text-[10px] uppercase tracking-[0.2em] opacity-75">Screen Hold</p>
+                        <p className="mt-1 text-sm font-semibold">{screenPaused ? "Resume screen" : "Pause screen"}</p>
+                        <p className="mt-1 text-[11px] opacity-75">Freeze the shared screen without opening the Command Center.</p>
                       </button>
                       <button
                         onClick={togglePauseWebcam}
                         disabled={!webcamReady && !webcamPaused}
-                        className={`rounded-2xl border px-3 py-3 text-left transition disabled:opacity-40 ${webcamPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                        className={`rounded-xl border px-2.5 py-2 text-left transition disabled:opacity-40 ${webcamPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
                       >
-                        <p className="text-[11px] uppercase tracking-[0.22em] opacity-75">Cam Hold</p>
-                        <p className="mt-1 font-semibold">{webcamPaused ? "Resume camera" : "Pause camera"}</p>
-                        <p className="mt-1 text-xs opacity-75">Freeze your camera feed in place on the canvas.</p>
+                        <p className="text-[10px] uppercase tracking-[0.2em] opacity-75">Cam Hold</p>
+                        <p className="mt-1 text-sm font-semibold">{webcamPaused ? "Resume camera" : "Pause camera"}</p>
+                        <p className="mt-1 text-[11px] opacity-75">Freeze your camera feed in place on the canvas.</p>
                       </button>
                       <button
                         onClick={toggleBrbMode}
-                        className={`rounded-2xl border px-3 py-3 text-left transition ${brbActive ? "border-indigo-500 bg-indigo-500 text-white" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                        className={`rounded-xl border px-2.5 py-2 text-left transition ${brbActive ? "border-indigo-500 bg-indigo-500 text-white" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
                       >
-                        <p className="text-[11px] uppercase tracking-[0.22em] opacity-75">Waiting Screen</p>
-                        <p className="mt-1 font-semibold">{brbActive ? "Return from BRB" : "We’ll be back"}</p>
-                        <p className="mt-1 text-xs opacity-75">Locks the stage and puts the waiting message up immediately.</p>
+                        <p className="text-[10px] uppercase tracking-[0.2em] opacity-75">Waiting Screen</p>
+                        <p className="mt-1 text-sm font-semibold">{brbActive ? "Return from BRB" : "We’ll be back"}</p>
+                        <p className="mt-1 text-[11px] opacity-75">Locks the stage and puts the waiting message up immediately.</p>
                       </button>
                       <button
                         onClick={() => setShowTeleprompterEditor(true)}
@@ -2132,6 +2499,107 @@ http.createServer((req, res) => {
                         <p className="mt-1 font-semibold text-foreground">{logo.hasLogo ? "Manage watermark" : "Add watermark"}</p>
                         <p className="mt-1 text-xs text-muted-foreground">Branding setup now stays beside the main stage controls.</p>
                       </button>
+                    </div>
+
+                    <div className="mt-3 grid gap-2 xl:grid-cols-2">
+                      <div className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Audio Mix</p>
+                            <p className="mt-1 text-sm font-semibold text-foreground">Mic and shared audio stay on stage.</p>
+                          </div>
+                          <span className="rounded-full border border-white/10 bg-black/25 px-2 py-1 text-[10px] text-muted-foreground">Live + Record</span>
+                        </div>
+                        <div className="mt-3 space-y-3">
+                          <div>
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-muted-foreground">Mic</span>
+                              <button
+                                onClick={() => setMicMuted((value) => !value)}
+                                disabled={!micAudioAvailable}
+                                className={`rounded-full border px-2.5 py-1 font-semibold transition disabled:opacity-40 ${micMuted ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                              >
+                                {micMuted ? "Muted" : micAudioAvailable ? "Live" : "Unavailable"}
+                              </button>
+                            </div>
+                            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                              <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-100" style={{ width: `${Math.round(micLevel * 100)}%` }} />
+                            </div>
+                            <div className="mt-2"><Slider label="Mic level" value={micVolume} min={0} max={150} step={1} suffix="%" onChange={setMicVolume} /></div>
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-muted-foreground">Screen audio</span>
+                              <button
+                                onClick={() => setScreenAudioMuted((value) => !value)}
+                                disabled={!screenAudioAvailable}
+                                className={`rounded-full border px-2.5 py-1 font-semibold transition disabled:opacity-40 ${screenAudioMuted ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                              >
+                                {screenAudioMuted ? "Muted" : screenAudioAvailable ? "Live" : "Unavailable"}
+                              </button>
+                            </div>
+                            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                              <div className="h-full rounded-full bg-sky-500 transition-[width] duration-100" style={{ width: `${Math.round(screenAudioLevel * 100)}%` }} />
+                            </div>
+                            <div className="mt-2"><Slider label="Screen level" value={screenAudioVolume} min={0} max={150} step={1} suffix="%" onChange={setScreenAudioVolume} /></div>
+                          </div>
+                          <div className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <p className="text-xs font-semibold text-foreground">Screen-audio smoke test</p>
+                                <p className="mt-1 text-[11px] text-muted-foreground">Use this when a browser claims to share audio but the meter stays dead.</p>
+                              </div>
+                              <button
+                                onClick={runScreenAudioSmokeTest}
+                                disabled={screenAudioSmokeTesting}
+                                className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-[11px] font-semibold transition hover:bg-white/[0.06] disabled:opacity-40"
+                              >
+                                {screenAudioSmokeTesting ? "Testing…" : "Run test"}
+                              </button>
+                            </div>
+                            {screenAudioSmokeStatus && <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{screenAudioSmokeStatus}</p>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Preset Library</p>
+                            <p className="mt-1 text-sm font-semibold text-foreground">Save and recall your stage layouts without opening the drawer.</p>
+                          </div>
+                          <span className="rounded-full border border-white/10 bg-black/25 px-2 py-1 text-[10px] text-muted-foreground">{presets.length} saved</span>
+                        </div>
+                        <div className="mt-3 flex gap-2">
+                          <input
+                            value={presetName}
+                            onChange={(e) => setPresetName(e.target.value)}
+                            placeholder="Save current scene"
+                            className="flex-1 rounded-full border border-white/10 bg-black/25 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70"
+                          />
+                          <button onClick={savePreset} className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/[0.16]">Save</button>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {presets.slice(0, 4).map((preset) => (
+                            <button
+                              key={preset.id}
+                              onClick={() => loadPreset(preset)}
+                              className="rounded-full border border-white/10 bg-black/25 px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-white/[0.06]"
+                            >
+                              {preset.name}
+                            </button>
+                          ))}
+                          {presets.length === 0 && <p className="text-xs text-muted-foreground">No scene presets yet. Save the current stage once and it becomes reusable.</p>}
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          <button onClick={exportPresets} className="rounded-full border border-white/10 bg-black/25 px-3 py-2 font-semibold transition hover:bg-white/[0.06]">Export Library</button>
+                          <label className="rounded-full border border-white/10 bg-black/25 px-3 py-2 font-semibold transition hover:bg-white/[0.06] cursor-pointer">
+                            Import Library
+                            <input type="file" accept="application/json" className="hidden" onChange={importPresets} />
+                          </label>
+                          <button onClick={() => setShowCreatorTools(true)} className="rounded-full border border-white/10 bg-black/25 px-3 py-2 font-semibold transition hover:bg-white/[0.06]">Open full library</button>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
