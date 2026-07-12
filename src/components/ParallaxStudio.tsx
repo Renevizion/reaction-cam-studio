@@ -81,6 +81,7 @@ const CAPTURE_KIT_KEY = "parallax-studio.capture-kit.v1";
 const KICK_RTMPS_URL = "rtmps://fa723fc1b171.global-contribute.live-video.net/app/";
 const QUICK_START_DISMISSED_KEY = "scriptcam.quick-start.dismissed.v1";
 const AUDIO_MIX_KEY = "scriptcam.audio-mix.v1";
+const CAMERA_DEVICE_KEY = "scriptcam.camera-device.v1";
 
 const RECORDING_QUALITY_BITS_PER_PIXEL: Record<RecordingQualityPreset, number> = {
   balanced: 0.09,
@@ -218,6 +219,8 @@ export default function Compositor() {
   const [webcamReady, setWebcamReady] = useState(false);
   const [screenMeta, setScreenMeta] = useState<string>("");
   const [webcamMeta, setWebcamMeta] = useState<string>("");
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCameraDeviceId, setSelectedCameraDeviceId] = useState(() => localStorage.getItem(CAMERA_DEVICE_KEY) || "");
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recStart, setRecStart] = useState<number | null>(null);
@@ -429,6 +432,10 @@ export default function Compositor() {
     localStorage.setItem(CAPTURE_KIT_KEY, JSON.stringify(captureConfig));
   }, [captureConfig]);
 
+  useEffect(() => {
+    localStorage.setItem(CAMERA_DEVICE_KEY, selectedCameraDeviceId);
+  }, [selectedCameraDeviceId]);
+
   const qualityRef = useRef<QualityTier>("high");
   qualityRef.current = quality;
   const snapRef = useRef(false);
@@ -479,6 +486,32 @@ export default function Compositor() {
       webcamVideoRef.current = v;
     }
   }, []);
+
+  const refreshVideoDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setVideoDevices(devices.filter((device) => device.kind === "videoinput"));
+    } catch {
+      // Ignore device enumeration errors until permission is granted.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshVideoDevices();
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices?.addEventListener) return;
+
+    const onDeviceChange = () => { void refreshVideoDevices(); };
+    mediaDevices.addEventListener("devicechange", onDeviceChange);
+    return () => mediaDevices.removeEventListener("devicechange", onDeviceChange);
+  }, [refreshVideoDevices]);
+
+  useEffect(() => {
+    if (!selectedCameraDeviceId) return;
+    if (videoDevices.some((device) => device.deviceId === selectedCameraDeviceId)) return;
+    setSelectedCameraDeviceId("");
+  }, [selectedCameraDeviceId, videoDevices]);
 
   const ensureAudioMixer = useCallback(() => {
     if (audioContextRef.current && audioDestinationRef.current) {
@@ -847,11 +880,22 @@ export default function Compositor() {
     }
   }, []);
 
-  const startWebcam = useCallback(async () => {
+  const startWebcam = useCallback(async (forcedDeviceId?: string) => {
     try {
       setError(null);
+      const targetDeviceId = forcedDeviceId ?? selectedCameraDeviceId;
+      const baseVideo: MediaTrackConstraints = {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 60 },
+      };
+
+      const requestedVideo: MediaTrackConstraints = targetDeviceId
+        ? { ...baseVideo, deviceId: { exact: targetDeviceId } }
+        : baseVideo;
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } },
+        video: requestedVideo,
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
@@ -867,15 +911,56 @@ export default function Compositor() {
       const s = track.getSettings();
       const hasMic = stream.getAudioTracks().length > 0;
       setWebcamMeta(`${track.label || "camera"} · ${s.width ?? "?"}×${s.height ?? "?"}${hasMic ? " · mic live" : ""}`);
+      if (s.deviceId) setSelectedCameraDeviceId(s.deviceId);
+      void refreshVideoDevices();
       track.addEventListener("ended", () => {
         setWebcamReady(false);
         setWebcamMeta("");
       });
       setWebcamReady(true);
     } catch (e: unknown) {
-      setError(`Webcam: ${e instanceof Error ? e.message : "capture failed"}`);
+      const message = e instanceof Error ? e.message : "capture failed";
+      const isDeviceConstraintError = e instanceof DOMException && e.name === "OverconstrainedError";
+      if (selectedCameraDeviceId && isDeviceConstraintError) {
+        setSelectedCameraDeviceId("");
+        setError("Selected camera is unavailable. Falling back to default camera.");
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              frameRate: { ideal: 60 },
+            },
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              sampleRate: { ideal: 48000 },
+            },
+          });
+          webcamStreamRef.current = fallbackStream;
+          const fallbackVideo = webcamVideoRef.current!;
+          fallbackVideo.srcObject = fallbackStream;
+          await fallbackVideo.play();
+          const fallbackTrack = fallbackStream.getVideoTracks()[0];
+          const settings = fallbackTrack.getSettings();
+          const hasMic = fallbackStream.getAudioTracks().length > 0;
+          setWebcamMeta(`${fallbackTrack.label || "camera"} · ${settings.width ?? "?"}×${settings.height ?? "?"}${hasMic ? " · mic live" : ""}`);
+          if (settings.deviceId) setSelectedCameraDeviceId(settings.deviceId);
+          fallbackTrack.addEventListener("ended", () => {
+            setWebcamReady(false);
+            setWebcamMeta("");
+          });
+          setWebcamReady(true);
+          void refreshVideoDevices();
+          return;
+        } catch {
+          // Fall through to generic error reporting.
+        }
+      }
+      setError(`Webcam: ${message}`);
     }
-  }, []);
+  }, [refreshVideoDevices, selectedCameraDeviceId]);
 
   const stopScreen = useCallback(() => {
     screenStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -889,6 +974,15 @@ export default function Compositor() {
     setWebcamReady(false);
     setWebcamMeta("");
   }, []);
+
+  const handleCameraSourceChange = useCallback(async (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextDeviceId = event.target.value;
+    setSelectedCameraDeviceId(nextDeviceId);
+    if (!webcamReady) return;
+
+    stopWebcam();
+    await startWebcam(nextDeviceId);
+  }, [startWebcam, stopWebcam, webcamReady]);
 
   const drawLayer = (
     ctx: CanvasRenderingContext2D,
@@ -2847,6 +2941,22 @@ http.createServer((req, res) => {
             >
               {webcamReady ? "Cam On" : "Start Cam"}
             </button>
+            <label className="flex items-center gap-2 rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[11px] text-white/85">
+              <span>Camera</span>
+              <select
+                value={selectedCameraDeviceId}
+                onChange={handleCameraSourceChange}
+                className="rounded bg-transparent text-[11px] text-white outline-none"
+                title="Choose camera source (including iPhone Continuity Camera)"
+              >
+                <option value="" className="bg-[#0b1020] text-white">Auto</option>
+                {videoDevices.map((device, index) => (
+                  <option key={device.deviceId || `${device.kind}-${index}`} value={device.deviceId} className="bg-[#0b1020] text-white">
+                    {device.label || `Camera ${index + 1}`}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               onClick={recording ? stopRecording : startRecording}
               disabled={!screenReady && !webcamReady}
