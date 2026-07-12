@@ -138,8 +138,6 @@ const getRecordingProfile = (width: number, height: number, fps: number, preset:
   const videoBitsPerSecond = estimateVideoBitrate(width, height, fps, preset);
   const audioBitsPerSecond = 320_000;
   const mimeType = getPreferredRecorderMimeType([
-    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-    "video/mp4",
     "video/webm;codecs=vp8,opus",
     "video/webm;codecs=vp9,opus",
     "video/webm",
@@ -348,7 +346,7 @@ export default function Compositor() {
   const [segmentEnabled, setSegmentEnabled] = useState(false);
   const [segmentReady, setSegmentReady] = useState(false);
   const [segmentLoading, setSegmentLoading] = useState(false);
-  const [segmentInvert, setSegmentInvert] = useState(false);
+  const [segmentInvert, setSegmentInvert] = useState(true);
   const [segmentError, setSegmentError] = useState<string | null>(null);
   const [featherPx, setFeatherPx] = useState(2);
   const [faceParallax, setFaceParallax] = useState(true);
@@ -365,7 +363,7 @@ export default function Compositor() {
   const headSmoothRef = useRef({ x: 0.5, y: 0.5 });
   const segmentEnabledRef = useRef(false);
   segmentEnabledRef.current = segmentEnabled;
-  const segmentInvertRef = useRef(false);
+  const segmentInvertRef = useRef(true);
   segmentInvertRef.current = segmentInvert;
   const featherRef = useRef(2);
   featherRef.current = featherPx;
@@ -2106,6 +2104,7 @@ http.createServer((req, res) => {
     }
     setSegmentEnabled(true);
     setSegmentMode("screen-clipped");
+    setSegmentInvert(true);
     setFaceParallax(true);
     setAutoParallax(true);
     applyWebcamLeadLayout();
