@@ -248,6 +248,7 @@ export default function Compositor() {
 
   const [screenReady, setScreenReady] = useState(false);
   const [webcamReady, setWebcamReady] = useState(false);
+  const [startingWebcam, setStartingWebcam] = useState(false);
   const [screenMeta, setScreenMeta] = useState<string>("");
   const [webcamMeta, setWebcamMeta] = useState<string>("");
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
@@ -924,6 +925,8 @@ export default function Compositor() {
   }, []);
 
   const startWebcam = useCallback(async (forcedDeviceId?: string) => {
+    if (startingWebcam) return;
+    setStartingWebcam(true);
     try {
       setError(null);
       const targetDeviceId = forcedDeviceId ?? selectedCameraDeviceId;
@@ -943,6 +946,14 @@ export default function Compositor() {
           ? { deviceId: { ideal: selectedMicDeviceId } }
           : true;
 
+      const relaxedVideo: MediaTrackConstraints = targetDeviceId
+        ? { deviceId: { exact: targetDeviceId } }
+        : {};
+
+      const cameraOnlyVideo: MediaTrackConstraints = targetDeviceId
+        ? { deviceId: { exact: targetDeviceId } }
+        : {};
+
       const webcamAttempts: Array<{ reason: string; constraints: MediaStreamConstraints }> = [
         { reason: "preferred constraints", constraints: { video: preferredVideo, audio: requestedAudio } },
       ];
@@ -950,13 +961,16 @@ export default function Compositor() {
       if (requestedAudio !== false) {
         webcamAttempts.push({ reason: "camera with auto mic", constraints: { video: preferredVideo, audio: true } });
       }
+      webcamAttempts.push({ reason: "relaxed camera constraints", constraints: { video: relaxedVideo, audio: requestedAudio } });
       webcamAttempts.push({ reason: "camera only", constraints: { video: preferredVideo, audio: false } });
+      webcamAttempts.push({ reason: "camera only relaxed", constraints: { video: cameraOnlyVideo, audio: false } });
 
       if (!targetDeviceId) {
         if (requestedAudio !== false) {
           webcamAttempts.push({ reason: "default camera + auto mic", constraints: { video: baseVideo, audio: true } });
         }
         webcamAttempts.push({ reason: "default camera only", constraints: { video: baseVideo, audio: false } });
+        webcamAttempts.push({ reason: "any camera", constraints: { video: true, audio: false } });
       }
 
       let stream: MediaStream | null = null;
@@ -994,8 +1008,10 @@ export default function Compositor() {
       const message = formatUserMediaError(e, "Camera");
       setError(`Webcam: ${message}`);
       toast.error(message);
+    } finally {
+      setStartingWebcam(false);
     }
-  }, [refreshMediaDevices, selectedCameraDeviceId, selectedMicDeviceId]);
+  }, [refreshMediaDevices, selectedCameraDeviceId, selectedMicDeviceId, startingWebcam]);
 
   const stopScreen = useCallback(() => {
     screenStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -2214,11 +2230,12 @@ http.createServer((req, res) => {
         <div className="flex gap-1">
           <button
             onClick={webcamReady ? stopWebcam : startWebcam}
-            className={`flex-1 text-sm rounded-md px-3 py-2 border transition ${
+            disabled={startingWebcam}
+            className={`flex-1 text-sm rounded-md px-3 py-2 border transition disabled:opacity-50 ${
               webcamReady ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
             }`}
           >
-            {webcamReady ? "Stop Webcam" : "Start Webcam"}
+            {webcamReady ? "Stop Webcam" : startingWebcam ? "Starting..." : "Start Webcam"}
           </button>
           <button
             onClick={togglePauseWebcam}
@@ -2659,10 +2676,11 @@ http.createServer((req, res) => {
                     </button>
                     <button
                       onClick={webcamReady ? stopWebcam : startWebcam}
-                      className={`rounded-[24px] border px-4 py-4 text-left transition ${webcamReady ? "border-primary bg-primary text-primary-foreground shadow-[0_18px_50px_rgba(220,38,38,0.35)]" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                      disabled={startingWebcam}
+                      className={`rounded-[24px] border px-4 py-4 text-left transition disabled:opacity-50 ${webcamReady ? "border-primary bg-primary text-primary-foreground shadow-[0_18px_50px_rgba(220,38,38,0.35)]" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
                     >
                       <p className="text-[11px] uppercase tracking-[0.22em] opacity-80">Source 02</p>
-                      <p className="mt-2 text-base font-semibold">{webcamReady ? "Camera connected" : "Start your camera"}</p>
+                      <p className="mt-2 text-base font-semibold">{webcamReady ? "Camera connected" : startingWebcam ? "Starting camera..." : "Start your camera"}</p>
                       <p className="mt-1 text-xs opacity-75">{webcamMeta || "Bring yourself into frame with 1080p capture and clean audio."}</p>
                     </button>
                     <button
@@ -3030,9 +3048,10 @@ http.createServer((req, res) => {
             </button>
             <button
               onClick={webcamReady ? stopWebcam : startWebcam}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${webcamReady ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+              disabled={startingWebcam}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${webcamReady ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
             >
-              {webcamReady ? "Stop Cam" : "Start Cam"}
+              {webcamReady ? "Stop Cam" : startingWebcam ? "Starting..." : "Start Cam"}
             </button>
             <label className="flex items-center gap-2 rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[11px] text-white/85">
               <span>Camera</span>
