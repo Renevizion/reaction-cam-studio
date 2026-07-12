@@ -1450,6 +1450,235 @@ http.createServer((req, res) => {
   const recLabel = `${String(Math.floor(recSecs / 60)).padStart(2, "0")}:${String(recSecs % 60).padStart(2, "0")}`;
   const sectionClassName = "rounded-[28px] border border-white/10 bg-black/25 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.22)] backdrop-blur-xl";
   const quickCardClassName = "rounded-[28px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_10px_30px_rgba(0,0,0,0.18)]";
+  const studioControlSections = (
+    <>
+      <section className={`${sectionClassName} space-y-2`}>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Sources</h2>
+        <div className="flex gap-1">
+          <button
+            onClick={screenReady ? stopScreen : startScreen}
+            className={`flex-1 text-sm rounded-md px-3 py-2 border transition ${
+              screenReady ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
+            }`}
+          >
+            {screenReady ? "Stop Screen" : "Share Screen"}
+          </button>
+          <button
+            onClick={togglePauseScreen}
+            disabled={!screenReady && !screenPaused}
+            title="Freeze / resume screen"
+            className={`text-xs rounded-md px-2 border transition disabled:opacity-40 ${
+              screenPaused ? "bg-amber-500 text-black border-amber-500" : "bg-card hover:bg-accent border-border"
+            }`}
+          >
+            {screenPaused ? "▶" : "❚❚"}
+          </button>
+        </div>
+        {screenMeta && <p className="text-[10px] text-muted-foreground truncate" title={screenMeta}>{screenMeta}{screenPaused && " · PAUSED"}</p>}
+        <div className="flex gap-1">
+          <button
+            onClick={webcamReady ? stopWebcam : startWebcam}
+            className={`flex-1 text-sm rounded-md px-3 py-2 border transition ${
+              webcamReady ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
+            }`}
+          >
+            {webcamReady ? "Stop Webcam" : "Start Webcam"}
+          </button>
+          <button
+            onClick={togglePauseWebcam}
+            disabled={!webcamReady && !webcamPaused}
+            title="Freeze / resume webcam"
+            className={`text-xs rounded-md px-2 border transition disabled:opacity-40 ${
+              webcamPaused ? "bg-amber-500 text-black border-amber-500" : "bg-card hover:bg-accent border-border"
+            }`}
+          >
+            {webcamPaused ? "▶" : "❚❚"}
+          </button>
+        </div>
+        {webcamMeta && <p className="text-[10px] text-muted-foreground truncate" title={webcamMeta}>{webcamMeta}{webcamPaused && " · PAUSED"}</p>}
+        {error && <p className="text-xs text-destructive bg-destructive/10 rounded p-2">{error}</p>}
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">BRB / Waiting Screen</h2>
+        <button
+          onClick={() => setBrbActive((v) => !v)}
+          className={`w-full text-sm rounded-md px-3 py-2 border transition ${
+            brbActive ? "bg-indigo-500 text-white border-indigo-500 animate-pulse" : "bg-card hover:bg-accent border-border"
+          }`}
+        >
+          {brbActive ? "Hide waiting overlay" : "Show \"We'll be back\" overlay"}
+        </button>
+        <input value={brbText} onChange={(e) => setBrbText(e.target.value)} placeholder="Headline" className="w-full bg-input rounded px-2 py-1 border border-border text-xs" />
+        <input value={brbSubtext} onChange={(e) => setBrbSubtext(e.target.value)} placeholder="Subtext" className="w-full bg-input rounded px-2 py-1 border border-border text-xs" />
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Depth · Person Cutout</h2>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded ${segmentReady ? "bg-emerald-500/20 text-emerald-400" : segmentLoading ? "bg-amber-500/20 text-amber-400" : "bg-zinc-700 text-zinc-400"}`}>
+            {segmentLoading ? "loading model…" : segmentReady ? "live" : "off"}
+          </span>
+        </div>
+        <button
+          onClick={() => setSegmentEnabled((v) => !v)}
+          className={`w-full text-sm rounded-md px-3 py-2 border transition ${
+            segmentEnabled ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
+          }`}
+        >
+          {segmentEnabled ? "Disable person cutout" : "Enable person cutout (behind screen)"}
+        </button>
+        <p className="text-[10px] text-muted-foreground leading-relaxed">
+          Uses on-device MediaPipe Selfie Segmentation to remove your background so the screen renders <em>behind</em> you.
+        </p>
+        {segmentError && <p className="text-[10px] text-destructive bg-destructive/10 rounded p-1.5">{segmentError}</p>}
+        {segmentEnabled && (
+          <>
+            <div className="grid grid-cols-2 gap-1 text-[11px]">
+              {(["screen-clipped", "full-cutout"] as const).map((m) => (
+                <button key={m} onClick={() => setSegmentMode(m)} className={`rounded px-2 py-1 border ${segmentMode === m ? "bg-accent border-primary" : "bg-card border-border"}`}>
+                  {m === "screen-clipped" ? "Screen-clipped" : "Full cutout"}
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={segmentInvert} onChange={(e) => setSegmentInvert(e.target.checked)} />
+              Invert mask
+            </label>
+            <Slider label="Edge feather" value={featherPx} min={0} max={8} step={1} suffix="px" onChange={setFeatherPx} />
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={faceParallax} onChange={(e) => setFaceParallax(e.target.checked)} />
+              Head-tracked parallax
+            </label>
+            {faceParallax && <Slider label="Parallax strength" value={parallaxStrength} min={0} max={200} step={5} suffix="px" onChange={setParallaxStrength} />}
+          </>
+        )}
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Layer Locks</h2>
+        <div className="grid grid-cols-2 gap-1 text-xs">
+          <button onClick={() => setScreenLocked((v) => !v)} className={`rounded px-2 py-1 border ${screenLocked ? "bg-amber-500 text-black border-amber-500" : "bg-card border-border"}`}>
+            {screenLocked ? "🔒 Screen" : "🔓 Screen"}
+          </button>
+          <button onClick={() => setWebcamLocked((v) => !v)} className={`rounded px-2 py-1 border ${webcamLocked ? "bg-amber-500 text-black border-amber-500" : "bg-card border-border"}`}>
+            {webcamLocked ? "🔒 Webcam" : "🔓 Webcam"}
+          </button>
+        </div>
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Streaming (Kick / Twitch / YouTube)</h2>
+        <input value={streamUrl} onChange={(e) => setStreamUrl(e.target.value)} placeholder="Stream URL (e.g. rtmps://…/app/)" className="w-full bg-input rounded px-2 py-1 border border-border text-xs font-mono" />
+        <input value={streamKey} onChange={(e) => setStreamKey(e.target.value)} type="password" placeholder="Stream Key" className="w-full bg-input rounded px-2 py-1 border border-border text-xs font-mono" />
+        <div className="grid grid-cols-3 gap-1 text-[11px]">
+          <label className="flex flex-col gap-0.5"><span className="text-muted-foreground">fps</span><select value={streamFps} onChange={(e) => setStreamFps(Number(e.target.value))} className="bg-input rounded px-1 py-1 border border-border"><option value={30}>30</option><option value={60}>60</option></select></label>
+          <label className="flex flex-col gap-0.5"><span className="text-muted-foreground">bitrate k</span><input type="number" value={streamBitrate} onChange={(e) => setStreamBitrate(Number(e.target.value))} className="bg-input rounded px-1 py-1 border border-border" /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-muted-foreground">keyframe s</span><input type="number" value={streamKeyframe} onChange={(e) => setStreamKeyframe(Number(e.target.value))} className="bg-input rounded px-1 py-1 border border-border" /></label>
+        </div>
+        <label className="flex items-center gap-2 text-[11px]"><span className="text-muted-foreground">Bridge port</span><input type="number" value={bridgePort} onChange={(e) => setBridgePort(Number(e.target.value))} className="w-20 bg-input rounded px-1 py-0.5 border border-border" /></label>
+        <button onClick={streaming ? stopStream : startStream} disabled={!screenReady && !webcamReady} className={`w-full text-sm rounded-md px-3 py-2 border transition disabled:opacity-40 ${streaming ? "bg-destructive text-destructive-foreground border-destructive animate-pulse" : "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600"}`}>
+          {streaming ? "■ Stop Stream" : "● Go Live via Local Bridge"}
+        </button>
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scene</h2>
+        <div className="grid grid-cols-4 gap-1 text-xs">
+          {(["black", "studio", "grid", "aurora"] as const).map((b) => (
+            <button key={b} onClick={() => setBgTone(b)} className={`rounded px-2 py-1 border capitalize ${bgTone === b ? "bg-accent border-primary" : "bg-card border-border"}`}>{b}</button>
+          ))}
+        </div>
+        <div className="flex gap-1">
+          <label className="flex-1 text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-accent text-center cursor-pointer">
+            {customBgUrl ? "Replace custom BG" : "Upload custom BG image"}
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => setCustomBgUrl(String(r.result)); r.readAsDataURL(f); }} />
+          </label>
+          {customBgUrl && <button onClick={() => setCustomBgUrl(null)} className="text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-destructive hover:text-destructive-foreground">✕</button>}
+        </div>
+        <button onClick={swapOrder} className="w-full text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent">Swap layer order (front: {order[1]})</button>
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={cinematic} onChange={(e) => setCinematic(e.target.checked)} />Cinematic</label>
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={autoParallax} onChange={(e) => setAutoParallax(e.target.checked)} />Auto parallax drift</label>
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={showGuides} onChange={(e) => setShowGuides(e.target.checked)} />Show guides</label>
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={snapGrid} onChange={(e) => setSnapGrid(e.target.checked)} />Snap to {GRID_SIZE}px grid</label>
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Performance</h2>
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={autoQuality} onChange={(e) => setAutoQuality(e.target.checked)} />Auto quality scaling</label>
+        <div className="grid grid-cols-3 gap-1 text-xs">
+          {(["high", "medium", "low"] as const).map((q) => (
+            <button key={q} onClick={() => { setAutoQuality(false); setQuality(q); }} className={`rounded px-2 py-1 border capitalize ${quality === q ? "bg-accent border-primary" : "bg-card border-border"}`}>{q}</button>
+          ))}
+        </div>
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Selected Layer</h2>
+          <button onClick={resetLayer} className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-accent">Reset</button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {(["screen", "webcam"] as LayerKey[]).map((k) => (
+            <button key={k} onClick={() => setSelected(k)} className={`text-sm rounded-md px-3 py-2 border capitalize ${selected === k ? "bg-accent border-primary" : "bg-card hover:bg-accent border-border"}`}>
+              {k}
+              {outOfSafe[k] && <span className="ml-1 text-amber-400">⚠</span>}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          {(["x", "y", "w", "h"] as const).map((k) => (
+            <label key={k} className="flex flex-col gap-1"><span className="text-muted-foreground uppercase">{k}</span><input type="number" value={Math.round(layer[k])} onChange={(e) => setField(k, Number(e.target.value))} className="bg-input rounded px-2 py-1 border border-border" /></label>
+          ))}
+        </div>
+        <Slider label="Rotation" value={layer.rotation} min={-180} max={180} step={0.5} suffix="°" onChange={(v) => setField("rotation", v)} />
+        <Slider label="Tilt X" value={layer.tiltX} min={-45} max={45} step={0.5} suffix="°" onChange={(v) => setField("tiltX", v)} />
+        <Slider label="Tilt Y" value={layer.tiltY} min={-45} max={45} step={0.5} suffix="°" onChange={(v) => setField("tiltY", v)} />
+        <Slider label="Opacity" value={layer.opacity} min={0} max={1} step={0.01} onChange={(v) => setField("opacity", v)} />
+        <Slider label="Scale" value={layer.scale} min={0.2} max={3} step={0.01} onChange={(v) => setField("scale", v)} />
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Style</h2>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={shadow} onChange={(e) => setShadow(e.target.checked)} />Drop shadow</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={rounded} onChange={(e) => setRounded(e.target.checked)} />Rounded webcam</label>
+        {rounded && <Slider label="Corner radius" value={roundedRadius} min={0} max={200} step={1} suffix="px" onChange={setRoundedRadius} />}
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scene Presets</h2>
+        <div className="flex gap-1">
+          <input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder="Name this scene" className="flex-1 bg-input rounded px-2 py-1 border border-border text-xs" />
+          <button onClick={savePreset} className="text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent">Save</button>
+        </div>
+        <div className="space-y-1 max-h-48 overflow-y-auto">
+          {presets.length === 0 && <p className="text-[11px] text-muted-foreground italic">No saved scenes yet</p>}
+          {presets.map((p) => (
+            <div key={p.id} className="flex items-center gap-1 group">
+              <button onClick={() => loadPreset(p)} className="flex-1 text-left text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent truncate">{p.name}</button>
+              <button onClick={() => deletePreset(p.id)} className="text-[10px] px-2 py-1 rounded border border-border opacity-0 group-hover:opacity-100 hover:bg-destructive hover:text-destructive-foreground">✕</button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className={`${sectionClassName} space-y-2`}>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Output</h2>
+        <button onClick={recording ? stopRecording : startRecording} disabled={!screenReady && !webcamReady} className={`w-full text-sm rounded-md px-3 py-2 border transition disabled:opacity-50 ${recording ? "bg-destructive text-destructive-foreground border-destructive animate-pulse" : "bg-card hover:bg-accent border-border"}`}>
+          {recording ? `■ Stop & Download (${recLabel})` : "● Start Recording"}
+        </button>
+        <p className="text-[10px] text-muted-foreground">WebM VP9 · 60fps target · what you see = what encodes</p>
+      </section>
+
+      <section className={`${sectionClassName} space-y-1 text-[11px] text-muted-foreground leading-relaxed`}>
+        <p>· Drag box to move · corners to resize</p>
+        <p>· Top ● handle to rotate (shift = snap 15°)</p>
+        <p>· Shift + resize locks aspect</p>
+        <p>· Arrows nudge · shift=20px · alt=1px</p>
+        <p>· [ ] rotate · Tab switches layer</p>
+      </section>
+    </>
+  );
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(220,38,38,0.16),transparent_28%),radial-gradient(circle_at_80%_20%,rgba(99,102,241,0.18),transparent_30%),linear-gradient(180deg,#06070b_0%,#090b12_100%)] text-foreground flex flex-col">
@@ -1471,7 +1700,7 @@ http.createServer((req, res) => {
             onClick={() => setShowCreatorTools(true)}
             className="rounded-xl border border-border bg-card px-3 py-2 text-foreground transition hover:bg-accent hover:text-accent-foreground"
           >
-            Creator Tools
+            Studio Drawer
           </button>
           <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-muted">
             <span className={`w-2 h-2 rounded-full ${fpsColor}`} />
@@ -1540,433 +1769,7 @@ http.createServer((req, res) => {
               </div>
             </div>
           </section>
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Sources</h2>
-            <div className="flex gap-1">
-              <button
-                onClick={screenReady ? stopScreen : startScreen}
-                className={`flex-1 text-sm rounded-md px-3 py-2 border transition ${
-                  screenReady ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
-                }`}
-              >
-                {screenReady ? "Stop Screen" : "Share Screen"}
-              </button>
-              <button
-                onClick={togglePauseScreen}
-                disabled={!screenReady && !screenPaused}
-                title="Freeze / resume screen"
-                className={`text-xs rounded-md px-2 border transition disabled:opacity-40 ${
-                  screenPaused ? "bg-amber-500 text-black border-amber-500" : "bg-card hover:bg-accent border-border"
-                }`}
-              >
-                {screenPaused ? "▶" : "❚❚"}
-              </button>
-            </div>
-            {screenMeta && <p className="text-[10px] text-muted-foreground truncate" title={screenMeta}>{screenMeta}{screenPaused && " · PAUSED"}</p>}
-            <div className="flex gap-1">
-              <button
-                onClick={webcamReady ? stopWebcam : startWebcam}
-                className={`flex-1 text-sm rounded-md px-3 py-2 border transition ${
-                  webcamReady ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
-                }`}
-              >
-                {webcamReady ? "Stop Webcam" : "Start Webcam"}
-              </button>
-              <button
-                onClick={togglePauseWebcam}
-                disabled={!webcamReady && !webcamPaused}
-                title="Freeze / resume webcam"
-                className={`text-xs rounded-md px-2 border transition disabled:opacity-40 ${
-                  webcamPaused ? "bg-amber-500 text-black border-amber-500" : "bg-card hover:bg-accent border-border"
-                }`}
-              >
-                {webcamPaused ? "▶" : "❚❚"}
-              </button>
-            </div>
-            {webcamMeta && <p className="text-[10px] text-muted-foreground truncate" title={webcamMeta}>{webcamMeta}{webcamPaused && " · PAUSED"}</p>}
-            {error && <p className="text-xs text-destructive bg-destructive/10 rounded p-2">{error}</p>}
-          </section>
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">BRB / Waiting Screen</h2>
-            <button
-              onClick={() => setBrbActive((v) => !v)}
-              className={`w-full text-sm rounded-md px-3 py-2 border transition ${
-                brbActive ? "bg-indigo-500 text-white border-indigo-500 animate-pulse" : "bg-card hover:bg-accent border-border"
-              }`}
-            >
-              {brbActive ? "Hide waiting overlay" : "Show \"We'll be back\" overlay"}
-            </button>
-            <input value={brbText} onChange={(e) => setBrbText(e.target.value)}
-              placeholder="Headline" className="w-full bg-input rounded px-2 py-1 border border-border text-xs" />
-            <input value={brbSubtext} onChange={(e) => setBrbSubtext(e.target.value)}
-              placeholder="Subtext" className="w-full bg-input rounded px-2 py-1 border border-border text-xs" />
-          </section>
-
-          <section className={`${sectionClassName} space-y-3`}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Creator Overlay Tools</h2>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">These legacy tools now render directly into the Parallax output.</p>
-              </div>
-              <button
-                onClick={() => setShowCreatorTools(true)}
-                className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              >
-                Drawer
-              </button>
-            </div>
-            <div className="grid gap-2 md:grid-cols-2">
-              <button
-                onClick={() => setShowTeleprompterEditor(true)}
-                className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-left transition hover:bg-white/[0.08]"
-              >
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground"><FileText className="h-4 w-4 text-primary" /> Teleprompter</div>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">Write your script once, then run it inside the recorded scene.</p>
-              </button>
-              <button
-                onClick={() => setShowLogoUploader(true)}
-                className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-left transition hover:bg-white/[0.08]"
-              >
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground"><ImageIcon className="h-4 w-4 text-primary" /> Logo / Watermark</div>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">Add a logo that becomes part of the exported frame.</p>
-              </button>
-            </div>
-            <div className="grid gap-2 text-xs">
-              <label className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                <span>Show teleprompter in output</span>
-                <input type="checkbox" checked={teleprompter.state.isVisible} onChange={() => teleprompter.toggleVisible()} />
-              </label>
-              {teleprompter.state.isVisible && (
-                <>
-                  <label className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                    <span>Auto-scroll</span>
-                    <input type="checkbox" checked={teleprompter.state.isAutoScrolling} onChange={() => teleprompter.toggleAutoScroll()} />
-                  </label>
-                  <Slider label="Prompt speed" value={teleprompter.state.scrollSpeed} min={1} max={10} step={1} onChange={teleprompter.setScrollSpeed} />
-                  <Slider label="Prompt size" value={teleprompter.state.fontSize} min={18} max={40} step={1} suffix="px" onChange={teleprompter.setFontSize} />
-                  <Slider label="Prompt opacity" value={teleprompter.state.opacity} min={25} max={90} step={1} suffix="%" onChange={teleprompter.setOpacity} />
-                  <button
-                    onClick={handleTeleprompterReset}
-                    className="rounded-xl border border-white/10 bg-card px-3 py-2 text-xs transition hover:bg-accent"
-                  >
-                    Reset prompt position
-                  </button>
-                </>
-              )}
-            </div>
-          </section>
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Depth · Person Cutout</h2>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded ${segmentReady ? "bg-emerald-500/20 text-emerald-400" : segmentLoading ? "bg-amber-500/20 text-amber-400" : "bg-zinc-700 text-zinc-400"}`}>
-                {segmentLoading ? "loading model…" : segmentReady ? "live" : "off"}
-              </span>
-            </div>
-            <button
-              onClick={() => setSegmentEnabled((v) => !v)}
-              className={`w-full text-sm rounded-md px-3 py-2 border transition ${
-                segmentEnabled ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
-              }`}
-            >
-              {segmentEnabled ? "Disable person cutout" : "Enable person cutout (behind screen)"}
-            </button>
-            <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Uses on-device MediaPipe Selfie Segmentation to remove your background so the screen renders <em>behind</em> you — hair, shoulders, and hands actually occlude it.
-            </p>
-            {segmentError && <p className="text-[10px] text-destructive bg-destructive/10 rounded p-1.5">{segmentError}</p>}
-            {segmentEnabled && (
-              <>
-                <div className="grid grid-cols-2 gap-1 text-[11px]">
-                  {(["screen-clipped", "full-cutout"] as const).map((m) => (
-                    <button key={m} onClick={() => setSegmentMode(m)}
-                      className={`rounded px-2 py-1 border ${segmentMode === m ? "bg-accent border-primary" : "bg-card border-border"}`}
-                      title={m === "screen-clipped"
-                        ? "Full webcam visible; cutout only applies where screen overlaps"
-                        : "Classic silhouette on top; background disappears"}>
-                      {m === "screen-clipped" ? "Screen-clipped" : "Full cutout"}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-muted-foreground leading-relaxed">
-                  {segmentMode === "screen-clipped"
-                    ? "Your whole room stays visible. The mask only kicks in where the screen sits — hair/hands push through the screen there."
-                    : "Only your silhouette renders on top of the screen."}
-                </p>
-                <label className="flex items-center gap-2 text-xs">
-                  <input type="checkbox" checked={segmentInvert} onChange={(e) => setSegmentInvert(e.target.checked)} />
-                  Invert mask (if you disappear instead of the background)
-                </label>
-                <Slider label="Edge feather" value={featherPx} min={0} max={8} step={1} suffix="px" onChange={setFeatherPx} />
-                <label className="flex items-center gap-2 text-xs">
-                  <input type="checkbox" checked={faceParallax} onChange={(e) => setFaceParallax(e.target.checked)} />
-                  Head-tracked parallax (screen follows your head)
-                </label>
-                {faceParallax && (
-                  <Slider label="Parallax strength" value={parallaxStrength} min={0} max={200} step={5} suffix="px" onChange={setParallaxStrength} />
-                )}
-                <p className="text-[10px] text-muted-foreground">
-                  Head: {(headSmoothRef.current.x * 100).toFixed(0)}%, {(headSmoothRef.current.y * 100).toFixed(0)}%
-                </p>
-              </>
-            )}
-          </section>
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Layer Locks</h2>
-            <div className="grid grid-cols-2 gap-1 text-xs">
-              <button onClick={() => setScreenLocked((v) => !v)}
-                className={`rounded px-2 py-1 border ${screenLocked ? "bg-amber-500 text-black border-amber-500" : "bg-card border-border"}`}>
-                {screenLocked ? "🔒 Screen" : "🔓 Screen"}
-              </button>
-              <button onClick={() => setWebcamLocked((v) => !v)}
-                className={`rounded px-2 py-1 border ${webcamLocked ? "bg-amber-500 text-black border-amber-500" : "bg-card border-border"}`}>
-                {webcamLocked ? "🔒 Webcam" : "🔓 Webcam"}
-              </button>
-            </div>
-            <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Locked layers ignore mouse. Also: hold <kbd className="px-1 rounded bg-muted">Alt</kbd> to click <em>through</em> the front layer and grab the one below.
-              {altHeld && <span className="text-amber-400"> · Alt held: front layer transparent to clicks</span>}
-            </p>
-          </section>
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Streaming (Kick / Twitch / YouTube)</h2>
-            <input value={streamUrl} onChange={(e) => setStreamUrl(e.target.value)}
-              placeholder="Stream URL (e.g. rtmps://…/app/)"
-              className="w-full bg-input rounded px-2 py-1 border border-border text-xs font-mono" />
-            <input value={streamKey} onChange={(e) => setStreamKey(e.target.value)}
-              type="password" placeholder="Stream Key"
-              className="w-full bg-input rounded px-2 py-1 border border-border text-xs font-mono" />
-            <div className="grid grid-cols-3 gap-1 text-[11px]">
-              <label className="flex flex-col gap-0.5">
-                <span className="text-muted-foreground">fps</span>
-                <select value={streamFps} onChange={(e) => setStreamFps(Number(e.target.value))}
-                  className="bg-input rounded px-1 py-1 border border-border">
-                  <option value={30}>30</option><option value={60}>60</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-muted-foreground">bitrate k</span>
-                <input type="number" value={streamBitrate} onChange={(e) => setStreamBitrate(Number(e.target.value))}
-                  className="bg-input rounded px-1 py-1 border border-border" />
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-muted-foreground">keyframe s</span>
-                <input type="number" value={streamKeyframe} onChange={(e) => setStreamKeyframe(Number(e.target.value))}
-                  className="bg-input rounded px-1 py-1 border border-border" />
-              </label>
-            </div>
-            <label className="flex items-center gap-2 text-[11px]">
-              <span className="text-muted-foreground">Bridge port</span>
-              <input type="number" value={bridgePort} onChange={(e) => setBridgePort(Number(e.target.value))}
-                className="w-20 bg-input rounded px-1 py-0.5 border border-border" />
-            </label>
-            <button
-              onClick={streaming ? stopStream : startStream}
-              disabled={!screenReady && !webcamReady}
-              className={`w-full text-sm rounded-md px-3 py-2 border transition disabled:opacity-40 ${
-                streaming ? "bg-destructive text-destructive-foreground border-destructive animate-pulse" : "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600"
-              }`}
-            >
-              {streaming ? "■ Stop Stream" : "● Go Live via Local Bridge"}
-            </button>
-            <button onClick={downloadBridgeScript}
-              className="w-full text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-accent">
-              ⬇ Download parallax-bridge.js (Node + ffmpeg)
-            </button>
-            {streamStatus && <p className="text-[10px] font-mono text-muted-foreground break-words">{streamStatus}</p>}
-            <details className="text-[10px] text-muted-foreground leading-relaxed">
-              <summary className="cursor-pointer text-foreground/80">How this works · local vs cloud</summary>
-              <div className="mt-1 space-y-1">
-                <p><b>Local (recommended, free):</b> browsers can't push RTMP directly. The downloaded bridge runs Node + <code>ffmpeg</code> on your machine, listens on <code>localhost:{bridgePort}</code>, and pipes this canvas straight to Kick/Twitch/YouTube. Command: <code>node parallax-bridge.js</code>.</p>
-                <p><b>Cloud fallback:</b> paste your Parallax browser URL into <a className="underline" href="https://restream.io" target="_blank" rel="noreferrer">Restream</a>'s "Add Video Source → Browser" or use <a className="underline" href="https://www.red5.net/rtmp-server/" target="_blank" rel="noreferrer">Red5</a> — they accept a browser tab and re-broadcast via RTMP to any destination.</p>
-                <p><b>Kick URL:</b> <code>rtmps://fa723fc1b171.global-contribute.live-video.net/app/</code></p>
-              </div>
-            </details>
-          </section>
-
-
-
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scene</h2>
-            <div className="grid grid-cols-4 gap-1 text-xs">
-              {(["black", "studio", "grid", "aurora"] as const).map((b) => (
-                <button key={b} onClick={() => setBgTone(b)}
-                  className={`rounded px-2 py-1 border capitalize ${bgTone === b ? "bg-accent border-primary" : "bg-card border-border"}`}>
-                  {b}
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-1">
-              <label className="flex-1 text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-accent text-center cursor-pointer">
-                {customBgUrl ? "Replace custom BG" : "Upload custom BG image"}
-                <input type="file" accept="image/*" className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0]; if (!f) return;
-                    const r = new FileReader();
-                    r.onload = () => setCustomBgUrl(String(r.result));
-                    r.readAsDataURL(f);
-                  }} />
-              </label>
-              {customBgUrl && (
-                <button onClick={() => setCustomBgUrl(null)}
-                  className="text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-destructive hover:text-destructive-foreground">✕</button>
-              )}
-            </div>
-            <button onClick={swapOrder} className="w-full text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent">
-              Swap layer order (front: {order[1]})
-            </button>
-            <label className="flex items-center gap-2 text-xs">
-              <input type="checkbox" checked={cinematic} onChange={(e) => setCinematic(e.target.checked)} />
-              Cinematic (glow ring + vignette)
-            </label>
-            <label className="flex items-center gap-2 text-xs">
-              <input type="checkbox" checked={autoParallax} onChange={(e) => setAutoParallax(e.target.checked)} />
-              Auto parallax drift (subtle motion)
-            </label>
-            <label className="flex items-center gap-2 text-xs">
-              <input type="checkbox" checked={showGuides} onChange={(e) => setShowGuides(e.target.checked)} />
-              Show safe-zone + grid guides
-            </label>
-            <label className="flex items-center gap-2 text-xs">
-              <input type="checkbox" checked={snapGrid} onChange={(e) => setSnapGrid(e.target.checked)} />
-              Snap to {GRID_SIZE}px grid
-            </label>
-          </section>
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Performance</h2>
-            <label className="flex items-center gap-2 text-xs">
-              <input type="checkbox" checked={autoQuality} onChange={(e) => setAutoQuality(e.target.checked)} />
-              Auto quality scaling
-            </label>
-            <div className="grid grid-cols-3 gap-1 text-xs">
-              {(["high", "medium", "low"] as const).map((q) => (
-                <button key={q} onClick={() => { setAutoQuality(false); setQuality(q); }}
-                  className={`rounded px-2 py-1 border capitalize ${quality === q ? "bg-accent border-primary" : "bg-card border-border"}`}>
-                  {q}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              Frame budget: {quality === "high" ? "16ms" : quality === "medium" ? "22ms" : "33ms"} · shadow blur {QUALITY_SETTINGS[quality].shadowBlur}px
-            </p>
-          </section>
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Selected Layer</h2>
-              <button onClick={resetLayer} className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-accent">Reset</button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {(["screen", "webcam"] as LayerKey[]).map((k) => (
-                <button key={k} onClick={() => setSelected(k)}
-                  className={`text-sm rounded-md px-3 py-2 border capitalize ${selected === k ? "bg-accent border-primary" : "bg-card hover:bg-accent border-border"}`}>
-                  {k}
-                  {outOfSafe[k] && <span className="ml-1 text-amber-400" title="outside safe zone">⚠</span>}
-                </button>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {(["x", "y", "w", "h"] as const).map((k) => (
-                <label key={k} className="flex flex-col gap-1">
-                  <span className="text-muted-foreground uppercase">{k}</span>
-                  <input type="number" value={Math.round(layer[k])}
-                    onChange={(e) => setField(k, Number(e.target.value))}
-                    className="bg-input rounded px-2 py-1 border border-border" />
-                </label>
-              ))}
-            </div>
-
-            <Slider label="Rotation" value={layer.rotation} min={-180} max={180} step={0.5} suffix="°" onChange={(v) => setField("rotation", v)} />
-            <Slider label="Tilt X (parallax)" value={layer.tiltX} min={-45} max={45} step={0.5} suffix="°" onChange={(v) => setField("tiltX", v)} />
-            <Slider label="Tilt Y (parallax)" value={layer.tiltY} min={-45} max={45} step={0.5} suffix="°" onChange={(v) => setField("tiltY", v)} />
-            <Slider label="Opacity" value={layer.opacity} min={0} max={1} step={0.01} onChange={(v) => setField("opacity", v)} />
-            <Slider label="Scale" value={layer.scale} min={0.2} max={3} step={0.01} onChange={(v) => setField("scale", v)} />
-          </section>
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Style</h2>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={shadow} onChange={(e) => setShadow(e.target.checked)} />
-              Drop shadow
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={rounded} onChange={(e) => setRounded(e.target.checked)} />
-              Rounded webcam
-            </label>
-            {rounded && (
-              <Slider label="Corner radius" value={roundedRadius} min={0} max={200} step={1} suffix="px" onChange={setRoundedRadius} />
-            )}
-          </section>
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scene Presets</h2>
-            <div className="flex gap-1">
-              <input value={presetName} onChange={(e) => setPresetName(e.target.value)}
-                placeholder="Name this scene"
-                className="flex-1 bg-input rounded px-2 py-1 border border-border text-xs" />
-              <button onClick={savePreset} className="text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent">Save</button>
-            </div>
-            <div className="space-y-1 max-h-48 overflow-y-auto">
-              {presets.length === 0 && <p className="text-[11px] text-muted-foreground italic">No saved scenes yet</p>}
-              {presets.map((p) => (
-                <div key={p.id} className="flex items-center gap-1 group">
-                  <button onClick={() => loadPreset(p)}
-                    className="flex-1 text-left text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent truncate">
-                    {p.name}
-                  </button>
-                  <button onClick={() => deletePreset(p.id)}
-                    className="text-[10px] px-2 py-1 rounded border border-border opacity-0 group-hover:opacity-100 hover:bg-destructive hover:text-destructive-foreground">
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-1">
-              <button onClick={exportPresets} disabled={!presets.length}
-                className="flex-1 text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-accent disabled:opacity-40">
-                Export JSON
-              </button>
-              <label className="flex-1 text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-accent text-center cursor-pointer">
-                Import
-                <input type="file" accept="application/json" className="hidden"
-                  onChange={(e) => e.target.files?.[0] && importPresets(e.target.files[0])} />
-              </label>
-            </div>
-            <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Saved to this browser (localStorage · <code className="text-foreground/70">{PRESETS_KEY}</code>) — private to you, survives refresh, cleared if you wipe site data. Use Export JSON to back up.
-            </p>
-          </section>
-
-          <section className={`${sectionClassName} space-y-2`}>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Output</h2>
-            <button
-              onClick={recording ? stopRecording : startRecording}
-              disabled={!screenReady && !webcamReady}
-              className={`w-full text-sm rounded-md px-3 py-2 border transition disabled:opacity-50 ${
-                recording ? "bg-destructive text-destructive-foreground border-destructive animate-pulse" : "bg-card hover:bg-accent border-border"
-              }`}
-            >
-              {recording ? `■ Stop & Download (${recLabel})` : "● Start Recording"}
-            </button>
-            <p className="text-[10px] text-muted-foreground">
-              WebM VP9 · 60fps target · what you see = what encodes
-            </p>
-          </section>
-
-          <section className={`${sectionClassName} space-y-1 text-[11px] text-muted-foreground leading-relaxed`}>
-            <p>· Drag box to move · corners to resize</p>
-            <p>· Top ● handle to rotate (shift = snap 15°)</p>
-            <p>· Shift + resize locks aspect</p>
-            <p>· Arrows nudge · shift=20px · alt=1px</p>
-            <p>· [ ] rotate · Tab switches layer</p>
-          </section>
+          {studioControlSections}
         </aside>
 
         <main className="flex-1 min-w-0 min-h-0 p-4 md:p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)]">
@@ -1996,7 +1799,7 @@ http.createServer((req, res) => {
                   onClick={() => setShowCreatorTools(true)}
                   className="rounded-xl bg-card px-3 py-2 text-sm transition hover:bg-accent"
                 >
-                  Open Full Controls
+                  Open Studio Drawer
                 </button>
                 <div className="ml-auto text-[11px] text-muted-foreground">
                   {screenReady ? "Screen ready" : "Screen idle"} · {webcamReady ? "Cam ready" : "Cam idle"}
@@ -2057,19 +1860,23 @@ http.createServer((req, res) => {
       </div>
 
       <Sheet open={showCreatorTools} onOpenChange={setShowCreatorTools}>
-        <SheetContent side="right" className="w-full border-l border-white/10 bg-[#080b12]/95 p-0 text-foreground sm:max-w-xl">
+        <SheetContent side="right" className="w-full border-l border-white/10 bg-[#080b12]/95 p-0 text-foreground sm:max-w-2xl">
           <div className="flex h-full flex-col">
             <SheetHeader className="border-b border-white/10 px-6 py-5">
               <div className="flex items-center gap-3">
                 <div className="rounded-2xl bg-primary/10 p-3 text-primary"><PanelsTopLeft className="h-5 w-5" /></div>
                 <div>
-                  <SheetTitle>Creator Tools Drawer</SheetTitle>
-                  <SheetDescription>Keep Parallax as the main studio and pull older recorder features in only where they improve the workflow.</SheetDescription>
+                  <SheetTitle>Studio Drawer</SheetTitle>
+                  <SheetDescription>Full Parallax controls on normal screens, with creator tools and local capture exports below.</SheetDescription>
                 </div>
               </div>
             </SheetHeader>
 
             <div className="flex-1 space-y-5 overflow-y-auto px-6 py-6">
+              <section className="2xl:hidden space-y-5">
+                {studioControlSections}
+              </section>
+
               <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
