@@ -232,6 +232,8 @@ export default function Compositor() {
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
   const webcamVideoRef = useRef<HTMLVideoElement | null>(null);
+  const lastScreenFrameRef = useRef<HTMLCanvasElement | null>(null);
+  const lastWebcamFrameRef = useRef<HTMLCanvasElement | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const webcamStreamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -1171,6 +1173,34 @@ export default function Compositor() {
     ctx.restore();
   };
 
+  const captureLastGoodFrame = (
+    source: CanvasImageSource | null,
+    ready: boolean,
+    cacheRef: React.MutableRefObject<HTMLCanvasElement | null>,
+  ) => {
+    if (!ready || !source) return;
+
+    const width = source instanceof HTMLVideoElement ? source.videoWidth : source instanceof HTMLCanvasElement ? source.width : 0;
+    const height = source instanceof HTMLVideoElement ? source.videoHeight : source instanceof HTMLCanvasElement ? source.height : 0;
+    if (width < 2 || height < 2) return;
+
+    if (!cacheRef.current) {
+      cacheRef.current = document.createElement("canvas");
+    }
+    const cache = cacheRef.current;
+    if (cache.width !== width || cache.height !== height) {
+      cache.width = width;
+      cache.height = height;
+    }
+    const cacheCtx = cache.getContext("2d");
+    if (!cacheCtx) return;
+    try {
+      cacheCtx.drawImage(source, 0, 0, width, height);
+    } catch {
+      // Ignore rare transient drawImage failures from unstable input frames.
+    }
+  };
+
   // Build a clip path matching a layer's transformed rounded rect.
   // Caller must ctx.save() before and ctx.restore() after.
   const clipToLayer = (
@@ -1607,14 +1637,23 @@ export default function Compositor() {
       const screenReady2 = screenPaused ? !!screenFrozenRef.current : !!sv && sv.readyState >= 2;
       const rawWebcamSrc: CanvasImageSource | null = webcamPaused ? webcamFrozenRef.current : wv;
       const rawWebcamReady = webcamPaused ? !!webcamFrozenRef.current : !!wv && wv.readyState >= 2;
+
+      captureLastGoodFrame(screenSrc, screenReady2, lastScreenFrameRef);
+      captureLastGoodFrame(rawWebcamSrc, rawWebcamReady, lastWebcamFrameRef);
+
+      const effectiveScreenSrc = screenReady2 ? screenSrc : lastScreenFrameRef.current;
+      const effectiveScreenReady = screenReady2 || !!lastScreenFrameRef.current;
+      const effectiveWebcamSrc = rawWebcamReady ? rawWebcamSrc : lastWebcamFrameRef.current;
+      const effectiveWebcamReady = rawWebcamReady || !!lastWebcamFrameRef.current;
+
       const personSrc = personCanvasRef.current;
       const personReady = !!(personSrc && personSrc.width > 0);
 
-      const drawScreen = () => drawLayer(ctx, screenSrc, screenT.current, {
+      const drawScreen = () => drawLayer(ctx, effectiveScreenSrc, screenT.current, {
         rounded: false, radius: 0,
         shadow: false, shadowStrength: 0.6, shadowBlur: qs.shadowBlur,
         parallaxDx: parallax.dx, parallaxDy: parallax.dy, parallaxRot: parallax.rot,
-        ready: screenReady2,
+        ready: effectiveScreenReady,
       });
       const drawWebcamRaw = () => {
         if (cinematicRef.current && shadow) {
@@ -1624,10 +1663,10 @@ export default function Compositor() {
             glowColor: "rgba(120,140,255,0.55)", ready: false,
           });
         }
-        drawLayer(ctx, rawWebcamSrc, webcamT.current, {
+        drawLayer(ctx, effectiveWebcamSrc, webcamT.current, {
           rounded, radius: roundedRadius,
           shadow, shadowStrength: 0.75, shadowBlur: qs.shadowBlur,
-          ready: rawWebcamReady,
+          ready: effectiveWebcamReady,
         });
       };
       const drawWebcamCutout = () => drawLayer(ctx, personSrc, webcamT.current, {
