@@ -83,7 +83,7 @@ const QUICK_START_DISMISSED_KEY = "scriptcam.quick-start.dismissed.v1";
 const AUDIO_MIX_KEY = "scriptcam.audio-mix.v1";
 const CAMERA_DEVICE_KEY = "scriptcam.camera-device.v1";
 const MIC_DEVICE_KEY = "scriptcam.mic-device.v1";
-const RECORDING_CAPTURE_FPS = 60;
+const RECORDING_CAPTURE_FPS = 30;
 const FRAME_CACHE_INTERVAL_MS = 120;
 
 const RECORDING_QUALITY_BITS_PER_PIXEL: Record<RecordingQualityPreset, number> = {
@@ -1531,7 +1531,7 @@ export default function Compositor() {
         setFrameMs(Math.round(maxFrame));
 
         // Auto-quality scaling
-        if (autoQuality) {
+        if (autoQuality && !recording) {
           const q = qualityRef.current;
           const now2 = performance.now();
           if (currentFps < 24 && q !== "low" && now2 - lastQualityShift > 2500) {
@@ -1768,7 +1768,7 @@ export default function Compositor() {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [shadow, rounded, roundedRadius, bgTone, order, autoQuality, screenPaused, webcamPaused, brbActive, brbText, brbSubtext, teleprompter, logo.config, overlays.settings]);
+  }, [shadow, rounded, roundedRadius, bgTone, order, autoQuality, recording, screenPaused, webcamPaused, brbActive, brbText, brbSubtext, teleprompter, logo.config, overlays.settings]);
 
   // recording timer
   useEffect(() => {
@@ -2059,6 +2059,7 @@ http.createServer((req, res) => {
   const startRecording = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    setPerfWarn(null);
     const recordingProfile = getRecordingProfile(CANVAS_W, CANVAS_H, RECORDING_CAPTURE_FPS, recordingQualityPreset);
     const stream = canvas.captureStream(recordingProfile.fps);
     appendMixedAudioTracks(stream);
