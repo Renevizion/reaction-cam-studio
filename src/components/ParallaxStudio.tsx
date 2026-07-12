@@ -84,6 +84,7 @@ const AUDIO_MIX_KEY = "scriptcam.audio-mix.v1";
 const CAMERA_DEVICE_KEY = "scriptcam.camera-device.v1";
 const MIC_DEVICE_KEY = "scriptcam.mic-device.v1";
 const RECORDING_CAPTURE_FPS = 60;
+const FRAME_CACHE_INTERVAL_MS = 120;
 
 const RECORDING_QUALITY_BITS_PER_PIXEL: Record<RecordingQualityPreset, number> = {
   balanced: 0.09,
@@ -235,6 +236,8 @@ export default function Compositor() {
   const webcamVideoRef = useRef<HTMLVideoElement | null>(null);
   const lastScreenFrameRef = useRef<HTMLCanvasElement | null>(null);
   const lastWebcamFrameRef = useRef<HTMLCanvasElement | null>(null);
+  const lastScreenFrameCaptureAtRef = useRef(0);
+  const lastWebcamFrameCaptureAtRef = useRef(0);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const webcamStreamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -1196,8 +1199,11 @@ export default function Compositor() {
     source: CanvasImageSource | null,
     ready: boolean,
     cacheRef: React.MutableRefObject<HTMLCanvasElement | null>,
+    now: number,
+    lastCaptureAtRef: React.MutableRefObject<number>,
   ) => {
     if (!ready || !source) return;
+    if (now - lastCaptureAtRef.current < FRAME_CACHE_INTERVAL_MS) return;
 
     const width = source instanceof HTMLVideoElement ? source.videoWidth : source instanceof HTMLCanvasElement ? source.width : 0;
     const height = source instanceof HTMLVideoElement ? source.videoHeight : source instanceof HTMLCanvasElement ? source.height : 0;
@@ -1215,6 +1221,7 @@ export default function Compositor() {
     if (!cacheCtx) return;
     try {
       cacheCtx.drawImage(source, 0, 0, width, height);
+      lastCaptureAtRef.current = now;
     } catch {
       // Ignore rare transient drawImage failures from unstable input frames.
     }
@@ -1657,8 +1664,8 @@ export default function Compositor() {
       const rawWebcamSrc: CanvasImageSource | null = webcamPaused ? webcamFrozenRef.current : wv;
       const rawWebcamReady = webcamPaused ? !!webcamFrozenRef.current : !!wv && wv.readyState >= 2;
 
-      captureLastGoodFrame(screenSrc, screenReady2, lastScreenFrameRef);
-      captureLastGoodFrame(rawWebcamSrc, rawWebcamReady, lastWebcamFrameRef);
+      captureLastGoodFrame(screenSrc, screenReady2, lastScreenFrameRef, now, lastScreenFrameCaptureAtRef);
+      captureLastGoodFrame(rawWebcamSrc, rawWebcamReady, lastWebcamFrameRef, now, lastWebcamFrameCaptureAtRef);
 
       const effectiveScreenSrc = screenReady2 ? screenSrc : lastScreenFrameRef.current;
       const effectiveScreenReady = screenReady2 || !!lastScreenFrameRef.current;
@@ -2087,7 +2094,7 @@ http.createServer((req, res) => {
       addRecording(recording);
       toast.success("Recording saved to gallery");
     };
-    rec.start(250);
+    rec.start(1000);
     recorderRef.current = rec;
     setRecording(true);
     const nowMs = Date.now();
