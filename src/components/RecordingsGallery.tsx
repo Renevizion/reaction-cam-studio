@@ -85,8 +85,11 @@ export const RecordingsGallery: React.FC<RecordingsGalleryProps> = ({
                     <div className="relative aspect-video bg-black">
                       <video
                         src={recording.url}
+                        poster={recording.thumbnail}
                         className="w-full h-full object-cover"
                         preload="metadata"
+                        playsInline
+                        muted
                       />
                       <button
                         onClick={() => onPlay(recording)}

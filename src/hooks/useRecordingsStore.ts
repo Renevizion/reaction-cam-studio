@@ -10,6 +10,7 @@ interface StoredRecording {
   blob: Blob;
   duration: number;
   createdAt: number;
+  thumbnail?: string;
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -35,6 +36,7 @@ export async function saveRecording(rec: Recording): Promise<void> {
       blob: rec.blob,
       duration: rec.duration,
       createdAt: rec.createdAt.getTime(),
+      thumbnail: rec.thumbnail,
     } as StoredRecording);
     await new Promise<void>((res, rej) => {
       tx.oncomplete = () => res();
@@ -62,6 +64,7 @@ export async function loadRecordings(): Promise<Recording[]> {
             url: URL.createObjectURL(s.blob),
             duration: s.duration,
             createdAt: new Date(s.createdAt),
+            thumbnail: s.thumbnail,
           }));
         resolve(recs);
       };

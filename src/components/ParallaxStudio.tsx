@@ -83,6 +83,7 @@ const QUICK_START_DISMISSED_KEY = "scriptcam.quick-start.dismissed.v1";
 const AUDIO_MIX_KEY = "scriptcam.audio-mix.v1";
 const CAMERA_DEVICE_KEY = "scriptcam.camera-device.v1";
 const MIC_DEVICE_KEY = "scriptcam.mic-device.v1";
+const RECORDING_CAPTURE_FPS = 30;
 
 const RECORDING_QUALITY_BITS_PER_PIXEL: Record<RecordingQualityPreset, number> = {
   balanced: 0.09,
@@ -2031,7 +2032,7 @@ http.createServer((req, res) => {
   const startRecording = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const recordingProfile = getRecordingProfile(CANVAS_W, CANVAS_H, 60, recordingQualityPreset);
+    const recordingProfile = getRecordingProfile(CANVAS_W, CANVAS_H, RECORDING_CAPTURE_FPS, recordingQualityPreset);
     const stream = canvas.captureStream(recordingProfile.fps);
     appendMixedAudioTracks(stream);
     const rec = new MediaRecorder(stream, {
@@ -2048,12 +2049,19 @@ http.createServer((req, res) => {
       }
       const blob = new Blob(recordedChunksRef.current, { type: rec.mimeType || recordingProfile.mimeType || "video/webm" });
       const url = URL.createObjectURL(blob);
+      let thumbnail: string | undefined;
+      try {
+        thumbnail = canvas.toDataURL("image/jpeg", 0.82);
+      } catch {
+        thumbnail = undefined;
+      }
       const recording: Recording = {
         id: `parallax-${Date.now()}`,
         blob,
         url,
         duration: Math.floor(recElapsedRef.current / 1000),
         createdAt: new Date(),
+        thumbnail,
       };
       addRecording(recording);
       toast.success("Recording saved to gallery");
@@ -2211,7 +2219,7 @@ http.createServer((req, res) => {
     fps >= 50 ? "good" : fps >= 30 ? "warn" : "bad";
   const fpsColor = fpsState === "good" ? "bg-emerald-500" : fpsState === "warn" ? "bg-amber-500" : "bg-red-500";
   const recordingProfile = useMemo(
-    () => getRecordingProfile(CANVAS_W, CANVAS_H, 60, recordingQualityPreset),
+    () => getRecordingProfile(CANVAS_W, CANVAS_H, RECORDING_CAPTURE_FPS, recordingQualityPreset),
     [recordingQualityPreset],
   );
 

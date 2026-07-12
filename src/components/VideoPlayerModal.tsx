@@ -28,10 +28,16 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         <X className="w-5 h-5" />
       </button>
 
-      {!videoReady && <div className="absolute inset-0 bg-black" />}
+      {!videoReady && (
+        <div
+          className="absolute inset-0 bg-black bg-center bg-cover"
+          style={recording.thumbnail ? { backgroundImage: `url(${recording.thumbnail})` } : undefined}
+        />
+      )}
       <video
         key={recording.id}
         src={recording.url}
+        poster={recording.thumbnail}
         className={`w-full h-full object-contain bg-black ${videoReady ? 'opacity-100' : 'opacity-0'}`}
         controls
         autoPlay
