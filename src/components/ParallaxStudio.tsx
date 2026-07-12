@@ -1,14 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImageSegmenter, FilesetResolver, type MPMask } from "@mediapipe/tasks-vision";
-import JSZip from "jszip";
 import { Crop, Download, Eye, EyeOff, FileText, ImageIcon, LayoutPanelTop, PanelsTopLeft } from "lucide-react";
-import { AspectRatioSelector } from "@/components/AspectRatioSelector";
-import { TeleprompterEditor } from "@/components/TeleprompterEditor";
-import { LogoUploader } from "@/components/LogoUploader";
-import { OverlayEditor } from "@/components/OverlayEditor";
-import { RecordingsGallery } from "@/components/RecordingsGallery";
-import { SoundEffectsBoard } from "@/components/SoundEffectsBoard";
-import { VideoPlayerModal } from "@/components/VideoPlayerModal";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAspectRatio } from "@/hooks/useAspectRatio";
 import { useLogo } from "@/hooks/useLogo";
@@ -16,9 +8,16 @@ import { useOverlays } from "@/hooks/useOverlays";
 import { useRecordings } from "@/hooks/useRecordings";
 import { useTeleprompter } from "@/hooks/useTeleprompter";
 import { defaultLocalCaptureConfig, generateLocalCaptureFiles, generateLocalCaptureSetup, type LocalCaptureConfig } from "@/lib/localCaptureKit";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import type { Recording } from "@/hooks/useRecorder";
+
+const AspectRatioSelector = lazy(() => import("@/components/AspectRatioSelector").then((module) => ({ default: module.AspectRatioSelector })));
+const TeleprompterEditor = lazy(() => import("@/components/TeleprompterEditor").then((module) => ({ default: module.TeleprompterEditor })));
+const LogoUploader = lazy(() => import("@/components/LogoUploader").then((module) => ({ default: module.LogoUploader })));
+const OverlayEditor = lazy(() => import("@/components/OverlayEditor").then((module) => ({ default: module.OverlayEditor })));
+const RecordingsGallery = lazy(() => import("@/components/RecordingsGallery").then((module) => ({ default: module.RecordingsGallery })));
+const SoundEffectsBoard = lazy(() => import("@/components/SoundEffectsBoard").then((module) => ({ default: module.SoundEffectsBoard })));
+const VideoPlayerModal = lazy(() => import("@/components/VideoPlayerModal").then((module) => ({ default: module.VideoPlayerModal })));
 
 type Transform = {
   x: number;
@@ -77,6 +76,7 @@ const GRID_SIZE = 40;
 const PRESETS_KEY = "parallax-studio.presets.v1";
 const TEMPLATES_SEEDED_KEY = "parallax-studio.templates.seeded.v1";
 const CAPTURE_KIT_KEY = "parallax-studio.capture-kit.v1";
+const KICK_RTMPS_URL = "rtmps://fa723fc1b171.global-contribute.live-video.net/app/";
 
 const defaultScreen: Transform = {
   x: 120, y: 90, w: 1500, h: 844,
@@ -145,7 +145,6 @@ const normalizeCaptureConfig = (config: LocalCaptureConfig): LocalCaptureConfig 
 };
 
 export default function Compositor() {
-  const navigate = useNavigate();
   const { aspectRatio, currentConfig, changeAspectRatio } = useAspectRatio();
   const teleprompter = useTeleprompter();
   const logo = useLogo();
@@ -831,6 +830,7 @@ export default function Compositor() {
 
   const downloadCaptureKit = useCallback(async (platform: "mac" | "win") => {
     try {
+      const { default: JSZip } = await import("jszip");
       const zip = new JSZip();
       const folder = zip.folder(platform === "mac" ? "Parallax Local Capture (Mac)" : "Parallax Local Capture (Windows)");
       if (!folder) throw new Error("Unable to create kit folder");
@@ -1634,6 +1634,14 @@ http.createServer((req, res) => {
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Streaming (Kick / Twitch / YouTube)</h2>
         <input value={streamUrl} onChange={(e) => setStreamUrl(e.target.value)} placeholder="Stream URL (e.g. rtmps://…/app/)" className="w-full bg-input rounded px-2 py-1 border border-border text-xs font-mono" />
         <input value={streamKey} onChange={(e) => setStreamKey(e.target.value)} type="password" placeholder="Stream Key" className="w-full bg-input rounded px-2 py-1 border border-border text-xs font-mono" />
+        <div className="flex flex-wrap gap-2 text-[11px]">
+          <button onClick={() => setStreamUrl(KICK_RTMPS_URL)} className="rounded-lg border border-white/10 bg-card px-2.5 py-1.5 transition hover:bg-accent">
+            Use Kick RTMPS URL
+          </button>
+          <button onClick={downloadBridgeScript} className="rounded-lg border border-white/10 bg-card px-2.5 py-1.5 transition hover:bg-accent">
+            Download Bridge
+          </button>
+        </div>
         <div className="grid grid-cols-3 gap-1 text-[11px]">
           <label className="flex flex-col gap-0.5"><span className="text-muted-foreground">fps</span><select value={streamFps} onChange={(e) => setStreamFps(Number(e.target.value))} className="bg-input rounded px-1 py-1 border border-border"><option value={30}>30</option><option value={60}>60</option></select></label>
           <label className="flex flex-col gap-0.5"><span className="text-muted-foreground">bitrate k</span><input type="number" value={streamBitrate} onChange={(e) => setStreamBitrate(Number(e.target.value))} className="bg-input rounded px-1 py-1 border border-border" /></label>
@@ -1643,6 +1651,10 @@ http.createServer((req, res) => {
         <button onClick={streaming ? stopStream : startStream} disabled={!screenReady && !webcamReady} className={`w-full text-sm rounded-md px-3 py-2 border transition disabled:opacity-40 ${streaming ? "bg-destructive text-destructive-foreground border-destructive animate-pulse" : "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600"}`}>
           {streaming ? "■ Stop Stream" : "● Go Live via Local Bridge"}
         </button>
+        {streamStatus && <p className="text-[10px] font-mono text-muted-foreground break-words">{streamStatus}</p>}
+        <p className="text-[10px] text-muted-foreground leading-relaxed">
+          Kick test flow: download and run the local bridge, paste your Kick stream key, then start Parallax streaming from this panel.
+        </p>
       </section>
 
       <section className={`${sectionClassName} space-y-2`}>
@@ -2099,65 +2111,67 @@ http.createServer((req, res) => {
         </SheetContent>
       </Sheet>
 
-      <TeleprompterEditor
-        isOpen={showTeleprompterEditor}
-        script={teleprompter.state.script}
-        onClose={() => setShowTeleprompterEditor(false)}
-        onSave={teleprompter.setScript}
-        onShow={teleprompter.show}
-      />
+      <Suspense fallback={null}>
+        <TeleprompterEditor
+          isOpen={showTeleprompterEditor}
+          script={teleprompter.state.script}
+          onClose={() => setShowTeleprompterEditor(false)}
+          onSave={teleprompter.setScript}
+          onShow={teleprompter.show}
+        />
 
-      <LogoUploader
-        isOpen={showLogoUploader}
-        config={logo.config}
-        onClose={() => setShowLogoUploader(false)}
-        onUpload={logo.uploadLogo}
-        onRemove={logo.removeLogo}
-        onUpdatePosition={logo.updatePosition}
-        onUpdateSize={logo.updateSize}
-        onUpdateOpacity={logo.updateOpacity}
-      />
+        <LogoUploader
+          isOpen={showLogoUploader}
+          config={logo.config}
+          onClose={() => setShowLogoUploader(false)}
+          onUpload={logo.uploadLogo}
+          onRemove={logo.removeLogo}
+          onUpdatePosition={logo.updatePosition}
+          onUpdateSize={logo.updateSize}
+          onUpdateOpacity={logo.updateOpacity}
+        />
 
-      <OverlayEditor
-        isOpen={showOverlayEditor}
-        settings={overlays.settings}
-        onClose={() => setShowOverlayEditor(false)}
-        onAddSocialLink={overlays.addSocialLink}
-        onUpdateSocialLink={overlays.updateSocialLink}
-        onRemoveSocialLink={overlays.removeSocialLink}
-        onSetPosition={overlays.setPosition}
-        onToggleBackground={overlays.toggleBackground}
-      />
+        <OverlayEditor
+          isOpen={showOverlayEditor}
+          settings={overlays.settings}
+          onClose={() => setShowOverlayEditor(false)}
+          onAddSocialLink={overlays.addSocialLink}
+          onUpdateSocialLink={overlays.updateSocialLink}
+          onRemoveSocialLink={overlays.removeSocialLink}
+          onSetPosition={overlays.setPosition}
+          onToggleBackground={overlays.toggleBackground}
+        />
 
-      <AspectRatioSelector
-        isOpen={showAspectRatio}
-        current={aspectRatio}
-        onSelect={changeAspectRatio}
-        onClose={() => setShowAspectRatio(false)}
-      />
+        <AspectRatioSelector
+          isOpen={showAspectRatio}
+          current={aspectRatio}
+          onSelect={changeAspectRatio}
+          onClose={() => setShowAspectRatio(false)}
+        />
 
-      <SoundEffectsBoard
-        isOpen={showSoundEffects}
-        onClose={() => setShowSoundEffects(false)}
-      />
+        <SoundEffectsBoard
+          isOpen={showSoundEffects}
+          onClose={() => setShowSoundEffects(false)}
+        />
 
-      <RecordingsGallery
-        isOpen={showGallery}
-        recordings={recordings}
-        onClose={() => setShowGallery(false)}
-        onPlay={(recording) => setPlayingRecording(recording)}
-        onDelete={deleteRecording}
-        onDownload={downloadRecording}
-        onShare={async (recording) => {
-          const ok = await shareRecording(recording);
-          if (!ok) toast.success("Downloaded — upload it where you want");
-        }}
-      />
+        <RecordingsGallery
+          isOpen={showGallery}
+          recordings={recordings}
+          onClose={() => setShowGallery(false)}
+          onPlay={(recording) => setPlayingRecording(recording)}
+          onDelete={deleteRecording}
+          onDownload={downloadRecording}
+          onShare={async (recording) => {
+            const ok = await shareRecording(recording);
+            if (!ok) toast.success("Downloaded — upload it where you want");
+          }}
+        />
 
-      <VideoPlayerModal
-        recording={playingRecording}
-        onClose={() => setPlayingRecording(null)}
-      />
+        <VideoPlayerModal
+          recording={playingRecording}
+          onClose={() => setPlayingRecording(null)}
+        />
+      </Suspense>
     </div>
   );
 }
