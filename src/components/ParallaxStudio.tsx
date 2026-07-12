@@ -385,6 +385,7 @@ export default function Compositor() {
   const [showSoundEffects, setShowSoundEffects] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
   const [showPrepPanel, setShowPrepPanel] = useState(false);
+  const [showDockPresets, setShowDockPresets] = useState(false);
   const [captureConfig, setCaptureConfig] = useState<LocalCaptureConfig>(() => {
     try {
       const raw = localStorage.getItem(CAPTURE_KIT_KEY);
@@ -1840,6 +1841,62 @@ http.createServer((req, res) => {
   };
   const swapOrder = () => setOrder((o) => [o[1], o[0]]);
 
+  const applyScreenLeadLayout = () => {
+    commitTransform("screen", { ...defaultScreen });
+    commitTransform("webcam", { ...defaultWebcam });
+    setOrder(["screen", "webcam"]);
+    setSelected("screen");
+  };
+
+  const applyWebcamLeadLayout = () => {
+    commitTransform("webcam", {
+      x: -80,
+      y: -45,
+      w: 2080,
+      h: 1170,
+      rotation: 0,
+      tiltX: 0,
+      tiltY: 0,
+      opacity: 1,
+      scale: 1,
+    });
+    commitTransform("screen", {
+      x: 1160,
+      y: 640,
+      w: 680,
+      h: 382,
+      rotation: -8,
+      tiltX: 10,
+      tiltY: -14,
+      opacity: 0.95,
+      scale: 1,
+    });
+    setOrder(["webcam", "screen"]);
+    setSelected("screen");
+  };
+
+  const toggleLeadLayout = () => {
+    const screenArea = screenT.current.w * screenT.current.h;
+    const webcamArea = webcamT.current.w * webcamT.current.h;
+    if (screenArea >= webcamArea) applyWebcamLeadLayout();
+    else applyScreenLeadLayout();
+  };
+
+  const toggleBehindHeadFx = () => {
+    const active = segmentEnabled && segmentMode === "screen-clipped";
+    if (active) {
+      setSegmentEnabled(false);
+      toast.success("Behind-head effect off");
+      return;
+    }
+    setSegmentEnabled(true);
+    setSegmentMode("screen-clipped");
+    setFaceParallax(true);
+    setAutoParallax(true);
+    applyWebcamLeadLayout();
+    toast.success("Behind-head effect on");
+  };
+
   // Presets
   const savePreset = () => {
     const name = presetName.trim() || `Scene ${presets.length + 1}`;
@@ -2826,12 +2883,51 @@ http.createServer((req, res) => {
             >
               {brbActive ? "Exit BRB" : "BRB"}
             </button>
+            <button
+              onClick={toggleLeadLayout}
+              className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]"
+            >
+              Swap Layout
+            </button>
+            <button
+              onClick={toggleBehindHeadFx}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${segmentEnabled && segmentMode === "screen-clipped" ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+            >
+              Behind Head FX
+            </button>
+            <button
+              onClick={() => setAutoParallax((value) => !value)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${autoParallax ? "border-sky-500 bg-sky-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+            >
+              Screen Parallax
+            </button>
             <button onClick={() => setShowTeleprompterEditor(true)} className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]">Script</button>
             <button onClick={() => setShowOverlayEditor(true)} className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]">Overlays</button>
             <button onClick={() => setShowLogoUploader(true)} className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]">Logo</button>
             <button onClick={quickSavePreset} className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]">Save Preset</button>
+            <button
+              onClick={() => setShowDockPresets((value) => !value)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${showDockPresets ? "border-primary bg-primary text-primary-foreground" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+            >
+              Saved Presets
+            </button>
             <span className="ml-auto rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[10px] text-white/80">{screenReady ? "screen ready" : "screen idle"} · {webcamReady ? "cam ready" : "cam idle"}</span>
           </div>
+          {showDockPresets && (
+            <div className="mt-2 flex flex-wrap gap-2 border-t border-white/10 pt-2">
+              {presets.slice(0, 8).map((preset) => (
+                <button
+                  key={preset.id}
+                  onClick={() => loadPreset(preset)}
+                  className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]"
+                >
+                  {preset.name}
+                </button>
+              ))}
+              {presets.length === 0 && <span className="text-[11px] text-white/70">No presets saved yet.</span>}
+              <button onClick={() => setShowGallery(true)} className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]">Open Library</button>
+            </div>
+          )}
         </div>
       </div>
 
