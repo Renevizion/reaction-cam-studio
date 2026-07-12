@@ -2380,7 +2380,7 @@ http.createServer((req, res) => {
         </aside>
 
         <main className="flex-1 min-w-0 min-h-0 overflow-y-auto p-4 md:p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)]">
-          <div className="flex min-h-full flex-col gap-4 pb-6">
+          <div className="flex min-h-full flex-col gap-4 pb-28">
             <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
               <div className={`${heroCardClassName} relative overflow-hidden`}>
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(239,68,68,0.18),transparent_28%),radial-gradient(circle_at_85%_20%,rgba(59,130,246,0.18),transparent_30%)]" />
@@ -2807,6 +2807,39 @@ http.createServer((req, res) => {
             </div>
           </div>
         </main>
+      </div>
+
+      <div className="pointer-events-none fixed bottom-3 left-1/2 z-50 w-[min(96vw,980px)] -translate-x-1/2">
+        <div className="pointer-events-auto rounded-2xl border border-white/15 bg-[#060912]/90 px-3 py-2 shadow-[0_20px_70px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-white/15 bg-black/35 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/85">Stage Dock</span>
+            <button
+              onClick={togglePauseScreen}
+              disabled={!screenReady && !screenPaused}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${screenPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+            >
+              {screenPaused ? "Resume Screen" : "Pause Screen"}
+            </button>
+            <button
+              onClick={togglePauseWebcam}
+              disabled={!webcamReady && !webcamPaused}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${webcamPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+            >
+              {webcamPaused ? "Resume Cam" : "Pause Cam"}
+            </button>
+            <button
+              onClick={toggleBrbMode}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${brbActive ? "border-indigo-500 bg-indigo-500 text-white" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+            >
+              {brbActive ? "Exit BRB" : "BRB"}
+            </button>
+            <button onClick={() => setShowTeleprompterEditor(true)} className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]">Script</button>
+            <button onClick={() => setShowOverlayEditor(true)} className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]">Overlays</button>
+            <button onClick={() => setShowLogoUploader(true)} className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]">Logo</button>
+            <button onClick={quickSavePreset} className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]">Save Preset</button>
+            <span className="ml-auto rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[10px] text-white/80">{screenReady ? "screen ready" : "screen idle"} · {webcamReady ? "cam ready" : "cam idle"}</span>
+          </div>
+        </div>
       </div>
 
       <Sheet open={showCreatorTools} onOpenChange={setShowCreatorTools}>
