@@ -1,1 +1,1 @@
-export { default } from "../../scene-canvas-sparkle-main/src/components/Compositor";
+export { default } from "@/components/ParallaxStudio";

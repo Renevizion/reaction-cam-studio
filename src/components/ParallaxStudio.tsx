@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImageSegmenter, FilesetResolver, type MPMask } from "@mediapipe/tasks-vision";
-import { FileText, ImageIcon, LayoutPanelTop, PanelsTopLeft } from "lucide-react";
+import JSZip from "jszip";
+import { Crop, Download, Eye, EyeOff, FileText, ImageIcon, LayoutPanelTop, PanelsTopLeft } from "lucide-react";
 import { TeleprompterEditor } from "@/components/TeleprompterEditor";
 import { LogoUploader } from "@/components/LogoUploader";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useLogo } from "@/hooks/useLogo";
 import { useTeleprompter } from "@/hooks/useTeleprompter";
+import { defaultLocalCaptureConfig, generateLocalCaptureFiles, generateLocalCaptureSetup, type LocalCaptureConfig } from "@/lib/localCaptureKit";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 type Transform = {
   x: number;
@@ -64,6 +67,7 @@ const SAFE_MARGIN = 60;
 const GRID_SIZE = 40;
 const PRESETS_KEY = "parallax-studio.presets.v1";
 const TEMPLATES_SEEDED_KEY = "parallax-studio.templates.seeded.v1";
+const CAPTURE_KIT_KEY = "parallax-studio.capture-kit.v1";
 
 const defaultScreen: Transform = {
   x: 120, y: 90, w: 1500, h: 844,
@@ -106,6 +110,30 @@ const BUILTIN_TEMPLATES: Omit<Preset, "id" | "createdAt">[] = [
     order: ["screen", "webcam"], bgTone: "studio", shadow: true, rounded: true, roundedRadius: 28,
   },
 ];
+
+const normalizeCaptureConfig = (config: LocalCaptureConfig): LocalCaptureConfig => {
+  const displayW = Math.max(1, Math.round(config.displayW));
+  const displayH = Math.max(1, Math.round(config.displayH));
+  const cropW = Math.max(1, Math.min(Math.round(config.w), displayW));
+  const cropH = Math.max(1, Math.min(Math.round(config.h), displayH));
+  const cropX = Math.max(0, Math.min(Math.round(config.x), displayW - cropW));
+  const cropY = Math.max(0, Math.min(Math.round(config.y), displayH - cropH));
+
+  return {
+    ...config,
+    videoIndex: Math.max(0, Math.round(config.videoIndex)),
+    audioIndex: Math.max(0, Math.round(config.audioIndex)),
+    displayW,
+    displayH,
+    x: cropX,
+    y: cropY,
+    w: cropW,
+    h: cropH,
+    fps: Math.max(1, Math.round(config.fps)),
+    segmentSeconds: Math.max(0, Math.round(config.segmentSeconds)),
+    crf: Math.max(0, Math.round(config.crf)),
+  };
+};
 
 export default function Compositor() {
   const navigate = useNavigate();
@@ -231,6 +259,15 @@ export default function Compositor() {
   const [showCreatorTools, setShowCreatorTools] = useState(false);
   const [showTeleprompterEditor, setShowTeleprompterEditor] = useState(false);
   const [showLogoUploader, setShowLogoUploader] = useState(false);
+  const [captureConfig, setCaptureConfig] = useState<LocalCaptureConfig>(() => {
+    try {
+      const raw = localStorage.getItem(CAPTURE_KIT_KEY);
+      return raw ? normalizeCaptureConfig({ ...defaultLocalCaptureConfig, ...JSON.parse(raw) }) : defaultLocalCaptureConfig;
+    } catch {
+      return defaultLocalCaptureConfig;
+    }
+  });
+  const [capturePreviewVisible, setCapturePreviewVisible] = useState(true);
   useEffect(() => { localStorage.setItem("parallax.streamUrl", streamUrl); }, [streamUrl]);
   useEffect(() => { localStorage.setItem("parallax.streamKey", streamKey); }, [streamKey]);
 
@@ -247,6 +284,10 @@ export default function Compositor() {
     image.onload = () => { logoImageRef.current = image; };
     image.src = logo.config.url;
   }, [logo.config.url]);
+
+  useEffect(() => {
+    localStorage.setItem(CAPTURE_KIT_KEY, JSON.stringify(captureConfig));
+  }, [captureConfig]);
 
   const qualityRef = useRef<QualityTier>("high");
   qualityRef.current = quality;
@@ -703,6 +744,55 @@ export default function Compositor() {
     teleprompterOffsetRef.current = 0;
     teleprompter.resetScroll();
   };
+
+  const setCaptureField = <K extends keyof LocalCaptureConfig>(key: K, value: LocalCaptureConfig[K]) => {
+    setCaptureConfig((prev) => normalizeCaptureConfig({ ...prev, [key]: value }));
+  };
+
+  const syncCaptureToScreenLayer = useCallback(() => {
+    const scaleX = captureConfig.displayW / CANVAS_W;
+    const scaleY = captureConfig.displayH / CANVAS_H;
+    setCaptureConfig((prev) => normalizeCaptureConfig({
+      ...prev,
+      x: Math.round(screenState.x * scaleX),
+      y: Math.round(screenState.y * scaleY),
+      w: Math.round(screenState.w * scaleX),
+      h: Math.round(screenState.h * scaleY),
+    }));
+    toast.success("Capture region synced from current screen layer");
+  }, [captureConfig.displayH, captureConfig.displayW, screenState.h, screenState.w, screenState.x, screenState.y]);
+
+  const copyCaptureSetup = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(generateLocalCaptureSetup(captureConfig));
+      toast.success("Capture setup copied");
+    } catch {
+      toast.error("Clipboard unavailable");
+    }
+  }, [captureConfig]);
+
+  const downloadCaptureKit = useCallback(async (platform: "mac" | "win") => {
+    try {
+      const zip = new JSZip();
+      const folder = zip.folder(platform === "mac" ? "Parallax Local Capture (Mac)" : "Parallax Local Capture (Windows)");
+      if (!folder) throw new Error("Unable to create kit folder");
+
+      for (const file of generateLocalCaptureFiles(captureConfig, platform)) {
+        folder.file(file.filename, file.body, file.filename.endsWith(".command") ? { unixPermissions: 0o755 } : undefined);
+      }
+
+      const blob = await zip.generateAsync({ type: "blob", platform: "UNIX" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = platform === "mac" ? "parallax-local-capture-mac.zip" : "parallax-local-capture-windows.zip";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success(platform === "mac" ? "Downloaded Mac capture kit" : "Downloaded Windows capture kit");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not build capture kit");
+    }
+  }, [captureConfig]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1423,8 +1513,8 @@ http.createServer((req, res) => {
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0">
-        <aside className="w-[23rem] border-r border-white/10 bg-black/25 p-4 space-y-4 overflow-y-auto backdrop-blur-xl">
+      <div className="flex flex-1 min-h-0 flex-col xl:flex-row">
+        <aside className="w-full xl:w-[23rem] xl:shrink-0 border-b xl:border-b-0 xl:border-r border-white/10 bg-black/25 p-4 space-y-4 overflow-y-auto backdrop-blur-xl max-h-[52vh] xl:max-h-none">
           <section className={`${quickCardClassName} space-y-3`}>
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1879,7 +1969,7 @@ http.createServer((req, res) => {
           </section>
         </aside>
 
-        <main className="flex-1 flex items-center justify-center p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)] min-w-0">
+        <main className="order-first xl:order-none flex-1 flex items-center justify-center p-4 md:p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)] min-w-0 min-h-[42vh] xl:min-h-0">
           <div className="relative w-full max-w-full" style={{ aspectRatio: `${CANVAS_W}/${CANVAS_H}` }}>
             <canvas ref={canvasRef} className="absolute inset-0 w-full h-full rounded-[28px] border border-white/10 shadow-[0_35px_120px_rgba(0,0,0,0.45)] bg-black" />
             {showGuides && (
@@ -1986,6 +2076,60 @@ http.createServer((req, res) => {
               </section>
 
               <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-2xl bg-primary/10 p-3 text-primary"><Crop className="h-5 w-5" /></div>
+                      <div>
+                        <h3 className="text-base font-semibold">Local Capture Kit</h3>
+                        <p className="text-sm text-muted-foreground">Pulled from the silent-region recorder: fixed pixel region presets plus downloadable local Mac and Windows starter kits.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setCapturePreviewVisible((value) => !value)}
+                    className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent"
+                  >
+                    {capturePreviewVisible ? <EyeOff className="mr-2 inline h-4 w-4" /> : <Eye className="mr-2 inline h-4 w-4" />}
+                    {capturePreviewVisible ? "Hide Preview" : "Show Preview"}
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+                  <CapturePreview config={captureConfig} visible={capturePreviewVisible} />
+                  <div className="space-y-3">
+                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-muted-foreground">
+                      <p className="font-medium text-foreground">Current export behavior</p>
+                      <p className="mt-1">This kit exports a local-only fixed pixel recorder. Use the sync button if you want the crop starter to match the screen layer you arranged in Parallax.</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <CaptureNumberField label="Display W" value={captureConfig.displayW} onChange={(value) => setCaptureField("displayW", value)} min={1} />
+                      <CaptureNumberField label="Display H" value={captureConfig.displayH} onChange={(value) => setCaptureField("displayH", value)} min={1} />
+                      <CaptureNumberField label="Crop X" value={captureConfig.x} onChange={(value) => setCaptureField("x", value)} min={0} />
+                      <CaptureNumberField label="Crop Y" value={captureConfig.y} onChange={(value) => setCaptureField("y", value)} min={0} />
+                      <CaptureNumberField label="Crop W" value={captureConfig.w} onChange={(value) => setCaptureField("w", value)} min={1} />
+                      <CaptureNumberField label="Crop H" value={captureConfig.h} onChange={(value) => setCaptureField("h", value)} min={1} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <CaptureNumberField label="Video Index" value={captureConfig.videoIndex} onChange={(value) => setCaptureField("videoIndex", value)} min={0} />
+                      <CaptureNumberField label="Audio Index" value={captureConfig.audioIndex} onChange={(value) => setCaptureField("audioIndex", value)} min={0} />
+                      <CaptureNumberField label="FPS" value={captureConfig.fps} onChange={(value) => setCaptureField("fps", value)} min={1} />
+                      <CaptureTextField label="Pixel Format" value={captureConfig.pixelFormat} onChange={(value) => setCaptureField("pixelFormat", value)} />
+                    </div>
+                    <CaptureTextField label="Audio Device Hint" value={captureConfig.audioDeviceName} onChange={(value) => setCaptureField("audioDeviceName", value)} />
+                    <CaptureTextField label="Output Directory" value={captureConfig.outputDir} onChange={(value) => setCaptureField("outputDir", value)} />
+                    <CaptureTextField label="File Prefix" value={captureConfig.filePrefix} onChange={(value) => setCaptureField("filePrefix", value)} />
+                    <div className="flex flex-wrap gap-3">
+                      <button onClick={syncCaptureToScreenLayer} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Use Screen Layer Bounds</button>
+                      <button onClick={() => downloadCaptureKit("mac")} className="rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"><Download className="mr-2 inline h-4 w-4" />Mac Kit</button>
+                      <button onClick={() => downloadCaptureKit("win")} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent"><Download className="mr-2 inline h-4 w-4" />Windows Kit</button>
+                      <button onClick={copyCaptureSetup} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Copy Setup</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
                 <div className="flex items-center gap-3">
                   <div className="rounded-2xl bg-primary/10 p-3 text-primary"><LayoutPanelTop className="h-5 w-5" /></div>
                   <div>
@@ -2039,6 +2183,104 @@ function Slider({
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={(e) => onChange(Number(e.target.value))} />
     </label>
+  );
+}
+
+function CaptureNumberField({
+  label,
+  value,
+  onChange,
+  min,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs">
+      <span className="text-muted-foreground uppercase tracking-[0.12em]">{label}</span>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-foreground"
+      />
+    </label>
+  );
+}
+
+function CaptureTextField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs">
+      <span className="text-muted-foreground uppercase tracking-[0.12em]">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-foreground"
+      />
+    </label>
+  );
+}
+
+function CapturePreview({ config, visible }: { config: LocalCaptureConfig; visible: boolean }) {
+  if (!visible) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-black/20 p-6 text-center">
+        <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-white/[0.06]">
+          <EyeOff className="h-5 w-5 text-muted-foreground" />
+        </div>
+        <p className="text-sm font-medium text-foreground">Preview hidden</p>
+        <p className="mt-1 text-xs text-muted-foreground">The exported kit still uses the same fixed pixel region.</p>
+      </div>
+    );
+  }
+
+  const aspect = config.displayW / config.displayH || 16 / 9;
+  const left = Math.max(0, Math.min(100, (config.x / config.displayW) * 100));
+  const top = Math.max(0, Math.min(100, (config.y / config.displayH) * 100));
+  const width = Math.max(0, Math.min(100 - left, (config.w / config.displayW) * 100));
+  const height = Math.max(0, Math.min(100 - top, (config.h / config.displayH) * 100));
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+      <div className="mb-3 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+        <span>Display {config.displayW}x{config.displayH}</span>
+        <span>Crop {config.w}x{config.h} @ ({config.x},{config.y})</span>
+      </div>
+      <div className="relative overflow-hidden rounded-2xl border border-white/10" style={{ aspectRatio: `${aspect}` }}>
+        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(26,35,52,1),rgba(12,31,56,1)_45%,rgba(48,18,39,1))]" />
+        <div className="absolute left-[8%] top-[12%] h-[22%] w-[30%] rounded-xl border border-white/12 bg-black/20 shadow-xl" />
+        <div className="absolute right-[10%] top-[16%] h-[18%] w-[20%] rounded-xl border border-white/10 bg-primary/15" />
+        <div className="absolute bottom-[8%] left-1/2 flex -translate-x-1/2 gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 backdrop-blur-md">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <span key={index} className="h-5 w-5 rounded-md bg-white/25" />
+          ))}
+        </div>
+        <div className="absolute inset-0 bg-black/45" />
+        <div
+          className="absolute rounded-xl border-2 border-primary"
+          style={{
+            left: `${left}%`,
+            top: `${top}%`,
+            width: `${width}%`,
+            height: `${height}%`,
+            boxShadow: "0 0 0 9999px rgba(0,0,0,0.5), 0 0 24px rgba(239,68,68,0.4)",
+          }}
+        >
+          <span className="absolute -top-6 left-0 text-[10px] uppercase tracking-[0.18em] text-primary">Target</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
