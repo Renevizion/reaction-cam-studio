@@ -127,12 +127,12 @@ const getRecordingProfile = (width: number, height: number, fps: number, preset:
 const formatMegabits = (bitsPerSecond: number) => `${(bitsPerSecond / 1_000_000).toFixed(1)} Mbps`;
 
 const defaultScreen: Transform = {
-  x: 120, y: 90, w: 1500, h: 844,
-  rotation: -7, tiltX: 10, tiltY: -14, opacity: 0.92, scale: 1,
+  x: -80, y: -45, w: 2080, h: 1170,
+  rotation: 0, tiltX: 0, tiltY: 0, opacity: 1, scale: 1,
 };
 const defaultWebcam: Transform = {
-  x: 1050, y: 380, w: 780, h: 600,
-  rotation: 2, tiltX: 0, tiltY: 0, opacity: 1, scale: 1,
+  x: 1290, y: 610, w: 560, h: 420,
+  rotation: 0, tiltX: 0, tiltY: 0, opacity: 1, scale: 1,
 };
 
 const QUALITY_SETTINGS: Record<QualityTier, { shadowBlur: number; scale: number; targetFps: number }> = {
@@ -229,7 +229,7 @@ export default function Compositor() {
   const [selected, setSelected] = useState<LayerKey>("screen");
   const [fps, setFps] = useState(0);
   const [frameMs, setFrameMs] = useState(0);
-  const [bgTone, setBgTone] = useState<BgTone>("studio");
+  const [bgTone, setBgTone] = useState<BgTone>("black");
   const [order, setOrder] = useState<LayerKey[]>(["screen", "webcam"]);
   const [snapGrid, setSnapGrid] = useState(false);
   const [showGuides, setShowGuides] = useState(true);
@@ -384,6 +384,7 @@ export default function Compositor() {
   const [showGallery, setShowGallery] = useState(false);
   const [showSoundEffects, setShowSoundEffects] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
+  const [showPrepPanel, setShowPrepPanel] = useState(false);
   const [captureConfig, setCaptureConfig] = useState<LocalCaptureConfig>(() => {
     try {
       const raw = localStorage.getItem(CAPTURE_KIT_KEY);
@@ -1387,8 +1388,8 @@ export default function Compositor() {
       const personReady = !!(personSrc && personSrc.width > 0);
 
       const drawScreen = () => drawLayer(ctx, screenSrc, screenT.current, {
-        rounded: true, radius: 18,
-        shadow, shadowStrength: 0.6, shadowBlur: qs.shadowBlur,
+        rounded: false, radius: 0,
+        shadow: false, shadowStrength: 0.6, shadowBlur: qs.shadowBlur,
         parallaxDx: parallax.dx, parallaxDy: parallax.dy, parallaxRot: parallax.rot,
         ready: screenReady2,
       });
@@ -2309,6 +2310,12 @@ http.createServer((req, res) => {
           >
             Library {recordings.length > 0 ? `(${recordings.length})` : ""}
           </button>
+          <button
+            onClick={() => setShowPrepPanel((value) => !value)}
+            className={`rounded-xl border px-3 py-2 text-foreground transition ${showPrepPanel ? "border-emerald-500/40 bg-emerald-500/15" : "border-border bg-card hover:bg-accent hover:text-accent-foreground"}`}
+          >
+            {showPrepPanel ? "Hide Prep" : "Show Prep"}
+          </button>
           <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-muted">
             <span className={`w-2 h-2 rounded-full ${fpsColor}`} />
             <span className="tabular-nums">{fps} fps</span>
@@ -2350,7 +2357,7 @@ http.createServer((req, res) => {
       )}
 
       <div className="flex flex-1 min-h-0 2xl:flex-row">
-        <aside className="hidden 2xl:block w-[22rem] shrink-0 border-r border-white/10 bg-black/25 p-4 space-y-4 overflow-y-auto backdrop-blur-xl">
+        <aside className={`${showPrepPanel ? "hidden 2xl:block" : "hidden"} w-[22rem] shrink-0 border-r border-white/10 bg-black/25 p-4 space-y-4 overflow-y-auto backdrop-blur-xl`}>
           <section className={`${quickCardClassName} space-y-3`}>
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -2381,6 +2388,7 @@ http.createServer((req, res) => {
 
         <main className="flex-1 min-w-0 min-h-0 overflow-y-auto p-4 md:p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)]">
           <div className="flex min-h-full flex-col gap-4 pb-28">
+            {showPrepPanel && (
             <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
               <div className={`${heroCardClassName} relative overflow-hidden`}>
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(239,68,68,0.18),transparent_28%),radial-gradient(circle_at_85%_20%,rgba(59,130,246,0.18),transparent_30%)]" />
@@ -2656,6 +2664,7 @@ http.createServer((req, res) => {
                 </section>
               </div>
             </section>
+            )}
 
             <div className="flex min-h-0 flex-1 items-center justify-center">
               <div
@@ -2771,6 +2780,32 @@ http.createServer((req, res) => {
         <div className="pointer-events-auto rounded-2xl border border-white/15 bg-[#060912]/90 px-3 py-2 shadow-[0_20px_70px_rgba(0,0,0,0.55)] backdrop-blur-xl">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full border border-white/15 bg-black/35 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/85">Stage Dock</span>
+            <button
+              onClick={screenReady ? stopScreen : startScreen}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${screenReady ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+            >
+              {screenReady ? "Screen On" : "Share Screen"}
+            </button>
+            <button
+              onClick={webcamReady ? stopWebcam : startWebcam}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${webcamReady ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+            >
+              {webcamReady ? "Cam On" : "Start Cam"}
+            </button>
+            <button
+              onClick={recording ? stopRecording : startRecording}
+              disabled={!screenReady && !webcamReady}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${recording ? "border-destructive bg-destructive text-destructive-foreground" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+            >
+              {recording ? "Stop Rec" : "Record"}
+            </button>
+            <button
+              onClick={streaming ? stopStream : startStream}
+              disabled={!screenReady && !webcamReady}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${streaming ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
+            >
+              {streaming ? "Stop Live" : "Go Live"}
+            </button>
             <button
               onClick={togglePauseScreen}
               disabled={!screenReady && !screenPaused}
