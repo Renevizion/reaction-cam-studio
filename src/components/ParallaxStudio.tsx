@@ -903,31 +903,48 @@ export default function Compositor() {
         frameRate: { ideal: 60 },
       };
 
-      const requestedVideo: MediaTrackConstraints = targetDeviceId
+      const exactVideo: MediaTrackConstraints = targetDeviceId
         ? { ...baseVideo, deviceId: { exact: targetDeviceId } }
         : baseVideo;
 
       const requestedAudio: MediaTrackConstraints | boolean = selectedMicDeviceId === "none"
         ? false
         : selectedMicDeviceId
-          ? {
-              deviceId: { exact: selectedMicDeviceId },
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-              sampleRate: { ideal: 48000 },
-            }
-          : {
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-              sampleRate: { ideal: 48000 },
-            };
+          ? { deviceId: { exact: selectedMicDeviceId } }
+          : true;
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: requestedVideo,
-        audio: requestedAudio,
-      });
+      const webcamAttempts: Array<{ reason: string; constraints: MediaStreamConstraints }> = [
+        { reason: "selected constraints", constraints: { video: exactVideo, audio: requestedAudio } },
+      ];
+
+      if (requestedAudio !== false) {
+        webcamAttempts.push({ reason: "camera with auto mic", constraints: { video: exactVideo, audio: true } });
+      }
+      webcamAttempts.push({ reason: "camera only", constraints: { video: exactVideo, audio: false } });
+
+      if (targetDeviceId) {
+        webcamAttempts.push({ reason: "default camera + requested audio", constraints: { video: baseVideo, audio: requestedAudio } });
+        if (requestedAudio !== false) {
+          webcamAttempts.push({ reason: "default camera + auto mic", constraints: { video: baseVideo, audio: true } });
+        }
+        webcamAttempts.push({ reason: "default camera only", constraints: { video: baseVideo, audio: false } });
+      }
+
+      let stream: MediaStream | null = null;
+      let lastError: unknown = null;
+      for (const attempt of webcamAttempts) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(attempt.constraints);
+          break;
+        } catch (attemptError) {
+          lastError = attemptError;
+        }
+      }
+
+      if (!stream) {
+        throw lastError instanceof Error ? lastError : new Error("capture failed");
+      }
+
       webcamStreamRef.current = stream;
       const v = webcamVideoRef.current!;
       v.srcObject = stream;
@@ -946,39 +963,8 @@ export default function Compositor() {
       toast.success(`Camera connected: ${track.label || "camera"}`);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "capture failed";
-      const isDeviceConstraintError = e instanceof DOMException && e.name === "OverconstrainedError";
-      if (selectedCameraDeviceId && isDeviceConstraintError) {
+      if (targetDeviceId) {
         setSelectedCameraDeviceId("");
-        setError("Selected camera is unavailable. Falling back to default camera.");
-        try {
-          const fallbackStream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
-              frameRate: { ideal: 60 },
-            },
-            audio: requestedAudio,
-          });
-          webcamStreamRef.current = fallbackStream;
-          const fallbackVideo = webcamVideoRef.current!;
-          fallbackVideo.srcObject = fallbackStream;
-          await fallbackVideo.play();
-          const fallbackTrack = fallbackStream.getVideoTracks()[0];
-          const settings = fallbackTrack.getSettings();
-          const hasMic = fallbackStream.getAudioTracks().length > 0;
-          setWebcamMeta(`${fallbackTrack.label || "camera"} · ${settings.width ?? "?"}×${settings.height ?? "?"}${hasMic ? " · mic live" : ""}`);
-          if (settings.deviceId) setSelectedCameraDeviceId(settings.deviceId);
-          fallbackTrack.addEventListener("ended", () => {
-            setWebcamReady(false);
-            setWebcamMeta("");
-          });
-          setWebcamReady(true);
-          void refreshMediaDevices();
-          toast.success(`Camera connected: ${fallbackTrack.label || "camera"}`);
-          return;
-        } catch {
-          // Fall through to generic error reporting.
-        }
       }
       setError(`Webcam: ${message}`);
       toast.error(`Camera failed: ${message}`);
