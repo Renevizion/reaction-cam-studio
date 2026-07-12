@@ -66,12 +66,18 @@
 
   body {
     @apply bg-background text-foreground;
-    overflow: hidden;
-    overscroll-behavior: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: contain;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
     touch-action: manipulation;
+  }
+
+  #root {
+    min-height: 100dvh;
   }
 
   input, textarea, select, button {

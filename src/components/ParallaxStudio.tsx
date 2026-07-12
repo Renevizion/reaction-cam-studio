@@ -1880,7 +1880,7 @@ http.createServer((req, res) => {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(220,38,38,0.16),transparent_28%),radial-gradient(circle_at_80%_20%,rgba(99,102,241,0.18),transparent_30%),linear-gradient(180deg,#06070b_0%,#090b12_100%)] text-foreground flex flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <header className="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary via-primary to-destructive shadow-lg shadow-primary/20" />
           <div>
@@ -1979,8 +1979,8 @@ http.createServer((req, res) => {
           {studioControlSections}
         </aside>
 
-        <main className="flex-1 min-w-0 min-h-0 p-4 md:p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)]">
-          <div className="flex h-full flex-col gap-4">
+        <main className="flex-1 min-w-0 min-h-0 overflow-y-auto p-4 md:p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)]">
+          <div className="flex min-h-full flex-col gap-4 pb-6">
             <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
               <div className={`${heroCardClassName} relative overflow-hidden`}>
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(239,68,68,0.18),transparent_28%),radial-gradient(circle_at_85%_20%,rgba(59,130,246,0.18),transparent_30%)]" />
@@ -1988,8 +1988,8 @@ http.createServer((req, res) => {
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="max-w-xl">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-primary/80">Launch Pad</p>
-                      <h2 className="mt-2 text-2xl font-semibold leading-tight text-foreground">Stay inside the shot. Everything critical is one move away.</h2>
-                      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Arm sources, record, go live, and open deeper controls without leaving the stage. The studio should feel as fast as Loom, as clear as StreamYard, and as dependable as OBS.</p>
+                      <h2 className="mt-2 text-2xl font-semibold leading-tight text-foreground">Run the shot without hunting for controls.</h2>
+                      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Share a source, bring in camera, record, and go live from one surface. Decorative copy is out of the way. Operational control stays close to the stage.</p>
                     </div>
                     <div className="rounded-[24px] border border-white/10 bg-black/25 px-4 py-3 text-right shadow-[0_18px_60px_rgba(0,0,0,0.2)]">
                       <p className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">Session State</p>
@@ -2044,8 +2044,8 @@ http.createServer((req, res) => {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="max-w-2xl">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Quick Start</p>
-                          <h3 className="mt-2 text-lg font-semibold text-foreground">Three moves to your first clean take.</h3>
-                          <p className="mt-1 text-sm text-muted-foreground">Start with the live inputs, then record. Add script, watermark, or overlays only if they help the shot.</p>
+                          <h3 className="mt-2 text-lg font-semibold text-foreground">Three moves. No scavenger hunt.</h3>
+                          <p className="mt-1 text-sm text-muted-foreground">Arm the inputs, check the frame, then record. Everything else is optional.</p>
                         </div>
                         <button
                           onClick={() => setQuickStartDismissed(true)}
@@ -2055,24 +2055,24 @@ http.createServer((req, res) => {
                         </button>
                       </div>
                       <div className="mt-4 grid gap-3 md:grid-cols-3">
-                        <button onClick={startScreen} className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-4 text-left transition hover:bg-white/[0.06]">
+                        <button onClick={startScreen} className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-3 text-left transition hover:bg-white/[0.06]">
                           <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Step 1</p>
                           <p className="mt-2 font-semibold text-foreground">Share screen</p>
-                          <p className="mt-1 text-xs text-muted-foreground">Bring the app, deck, or browser tab you want on stage.</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Bring the app or tab onto the canvas.</p>
                         </button>
-                        <button onClick={startWebcam} className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-4 text-left transition hover:bg-white/[0.06]">
+                        <button onClick={startWebcam} className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-3 text-left transition hover:bg-white/[0.06]">
                           <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Step 2</p>
                           <p className="mt-2 font-semibold text-foreground">Start camera</p>
-                          <p className="mt-1 text-xs text-muted-foreground">Layer yourself into frame with the default 1080p capture path.</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Layer yourself into frame with the default capture path.</p>
                         </button>
                         <button
                           onClick={startRecording}
                           disabled={!screenReady && !webcamReady}
-                          className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-4 text-left transition hover:bg-white/[0.06] disabled:opacity-40"
+                          className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-3 text-left transition hover:bg-white/[0.06] disabled:opacity-40"
                         >
                           <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Step 3</p>
                           <p className="mt-2 font-semibold text-foreground">Record take</p>
-                          <p className="mt-1 text-xs text-muted-foreground">Capture the exact live canvas once your source stack looks right.</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Capture the live canvas once framing looks right.</p>
                         </button>
                       </div>
                     </div>
@@ -2085,40 +2085,52 @@ http.createServer((req, res) => {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Session Pulse</p>
-                      <h3 className="mt-2 text-lg font-semibold text-foreground">Know the state without digging.</h3>
+                      <h3 className="mt-2 text-lg font-semibold text-foreground">Critical status only.</h3>
                     </div>
                     <div className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] text-muted-foreground">{currentConfig.label}</div>
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-4">
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-3">
                       <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Performance</p>
-                      <p className="mt-2 text-2xl font-semibold text-foreground">{fps} fps</p>
+                      <p className="mt-1 text-xl font-semibold text-foreground">{fps} fps</p>
                       <p className="text-xs text-muted-foreground">Peak frame {frameMs}ms · quality {quality}</p>
                     </div>
-                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-4">
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-3">
                       <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Sources</p>
-                      <p className="mt-2 text-2xl font-semibold text-foreground">{sourceReadyCount}/2</p>
+                      <p className="mt-1 text-xl font-semibold text-foreground">{sourceReadyCount}/2</p>
                       <p className="text-xs text-muted-foreground">{screenReady ? "Screen armed" : "Screen idle"} · {webcamReady ? "Cam armed" : "Cam idle"}</p>
                     </div>
-                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-4">
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-3">
                       <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Selected Layer</p>
-                      <p className="mt-2 text-2xl font-semibold capitalize text-foreground">{selected}</p>
+                      <p className="mt-1 text-xl font-semibold capitalize text-foreground">{selected}</p>
                       <p className="text-xs text-muted-foreground">Front layer: {frontLayer} {outOfSafe[selected] ? "· outside safe area" : "· inside safe area"}</p>
                     </div>
-                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-4">
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-3">
                       <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Capture</p>
-                      <p className="mt-2 text-lg font-semibold text-foreground capitalize">{recordingQualityPreset}</p>
+                      <p className="mt-1 text-base font-semibold text-foreground capitalize">{recordingQualityPreset}</p>
                       <p className="text-xs text-muted-foreground">{recordingSummary}</p>
                     </div>
                   </div>
                 </section>
 
                 <section className={heroCardClassName}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Operator Notes</p>
-                  <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-                    <p>What the audience sees is what encodes. Recordings are saved from the live canvas, not a hidden alternate layout.</p>
-                    <p>Teleprompter, overlays, sound cues, watermark, and local capture exports all stay inside this one studio surface.</p>
-                    <p>Use <span className="text-foreground">Tab</span> to switch layers, <span className="text-foreground">[ ]</span> to rotate, and open the Command Center for deeper scene control.</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Stage Shortcuts</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-3">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Switch</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">Tab</p>
+                      <p className="text-xs text-muted-foreground">Cycle the active layer.</p>
+                    </div>
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-3">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Rotate</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">[ ]</p>
+                      <p className="text-xs text-muted-foreground">Nudge the selected layer angle.</p>
+                    </div>
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-3">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Truth</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">Live canvas is the export</p>
+                      <p className="text-xs text-muted-foreground">No hidden alternate layout or surprise render path.</p>
+                    </div>
                   </div>
                 </section>
               </div>
@@ -2236,7 +2248,7 @@ http.createServer((req, res) => {
 
       <Sheet open={showCreatorTools} onOpenChange={setShowCreatorTools}>
         <SheetContent side="right" className="w-full border-l border-white/10 bg-[#080b12]/95 p-0 text-foreground sm:max-w-2xl">
-          <div className="flex h-full flex-col">
+          <div className="flex h-full min-h-0 flex-col">
             <SheetHeader className="border-b border-white/10 px-6 py-5">
               <div className="flex items-center gap-3">
                 <div className="rounded-2xl bg-primary/10 p-3 text-primary"><PanelsTopLeft className="h-5 w-5" /></div>
@@ -2247,7 +2259,7 @@ http.createServer((req, res) => {
               </div>
             </SheetHeader>
 
-            <div className="flex-1 space-y-5 overflow-y-auto px-6 py-6">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-6 overscroll-contain">
               <section className="2xl:hidden space-y-5">
                 {studioControlSections}
               </section>
