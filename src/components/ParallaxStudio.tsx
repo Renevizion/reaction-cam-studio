@@ -114,66 +114,6 @@ const canPlaybackMimeType = (type: string) => {
 const getPreferredRecorderMimeType = (candidates: string[]) =>
   candidates.find((type) => MediaRecorder.isTypeSupported(type) && canPlaybackMimeType(type));
 
-const createThumbnailFromBlob = async (blob: Blob): Promise<string | undefined> => {
-  if (typeof document === "undefined") return undefined;
-
-  const url = URL.createObjectURL(blob);
-  const video = document.createElement("video");
-  video.preload = "metadata";
-  video.muted = true;
-  video.playsInline = true;
-  video.src = url;
-
-  const waitForEvent = <K extends keyof HTMLMediaElementEventMap>(
-    target: HTMLMediaElement,
-    event: K,
-    timeoutMs: number,
-  ) => new Promise<void>((resolve, reject) => {
-    const timeoutId = window.setTimeout(() => {
-      cleanup();
-      reject(new Error(`Timed out waiting for ${String(event)}`));
-    }, timeoutMs);
-
-    const onSuccess = () => {
-      cleanup();
-      resolve();
-    };
-    const onError = () => {
-      cleanup();
-      reject(new Error("thumbnail decode failed"));
-    };
-    const cleanup = () => {
-      window.clearTimeout(timeoutId);
-      target.removeEventListener(event, onSuccess);
-      target.removeEventListener("error", onError);
-    };
-
-    target.addEventListener(event, onSuccess, { once: true });
-    target.addEventListener("error", onError, { once: true });
-  });
-
-  try {
-    await waitForEvent(video, "loadeddata", 4000);
-    if (Number.isFinite(video.duration) && video.duration > 0.2) {
-      video.currentTime = Math.min(0.2, Math.max(0.05, video.duration / 10));
-      await waitForEvent(video, "seeked", 3000);
-    }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return undefined;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.82);
-  } catch {
-    return undefined;
-  } finally {
-    video.src = "";
-    URL.revokeObjectURL(url);
-  }
-};
-
 const formatUserMediaError = (error: unknown, sourceLabel: string) => {
   if (error instanceof DOMException) {
     if (error.name === "NotAllowedError") {
@@ -301,6 +241,8 @@ export default function Compositor() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recElapsedRef = useRef(0);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const finalRecordingDurationMsRef = useRef(0);
 
   const screenT = useRef<Transform>(defaultScreen);
   const webcamT = useRef<Transform>(defaultWebcam);
@@ -2121,36 +2063,56 @@ http.createServer((req, res) => {
     recordedChunksRef.current = [];
     rec.ondataavailable = (e) => e.data.size > 0 && recordedChunksRef.current.push(e.data);
     rec.onstop = () => {
-      void (async () => {
-        if (recordedChunksRef.current.length < 1) {
-          toast.error("Recording finished with no media data. Try a longer take and retry.");
-          return;
-        }
-        const blob = new Blob(recordedChunksRef.current, { type: rec.mimeType || recordingProfile.mimeType || "video/webm" });
-        const url = URL.createObjectURL(blob);
-        const thumbnail = await createThumbnailFromBlob(blob);
-        const recording: Recording = {
-          id: `parallax-${Date.now()}`,
-          blob,
-          url,
-          duration: Math.floor(recElapsedRef.current / 1000),
-          createdAt: new Date(),
-          thumbnail,
-        };
-        addRecording(recording);
-        toast.success("Recording saved to gallery");
-      })();
+      if (recordedChunksRef.current.length < 1) {
+        toast.error("Recording ended without media chunks. Retry once; if it repeats, switch camera source and try again.");
+        return;
+      }
+      const blob = new Blob(recordedChunksRef.current, { type: rec.mimeType || recordingProfile.mimeType || "video/webm" });
+      const url = URL.createObjectURL(blob);
+      let thumbnail: string | undefined;
+      try {
+        thumbnail = canvas.toDataURL("image/jpeg", 0.82);
+      } catch {
+        thumbnail = undefined;
+      }
+      const durationSeconds = Math.max(1, Math.round(finalRecordingDurationMsRef.current / 1000));
+      const recording: Recording = {
+        id: `parallax-${Date.now()}`,
+        blob,
+        url,
+        duration: durationSeconds,
+        createdAt: new Date(),
+        thumbnail,
+      };
+      addRecording(recording);
+      toast.success("Recording saved to gallery");
     };
-    rec.start(1000);
+    rec.start(250);
     recorderRef.current = rec;
     setRecording(true);
-    setRecStart(Date.now());
+    const nowMs = Date.now();
+    recordingStartedAtRef.current = nowMs;
+    finalRecordingDurationMsRef.current = 0;
+    setRecStart(nowMs);
     setRecElapsed(0);
   }, [addRecording, appendMixedAudioTracks, recordingQualityPreset]);
 
   const stopRecording = useCallback(() => {
-    recorderRef.current?.stop();
+    const rec = recorderRef.current;
+    if (!rec) return;
+
+    const startedAt = recordingStartedAtRef.current;
+    const elapsedFromClock = startedAt ? Date.now() - startedAt : recElapsedRef.current;
+    finalRecordingDurationMsRef.current = Math.max(recElapsedRef.current, elapsedFromClock);
+
+    try {
+      if (rec.state === "recording") rec.requestData();
+    } catch {
+      // Some browsers may reject requestData during edge transitions; stop continues.
+    }
+    rec.stop();
     recorderRef.current = null;
+    recordingStartedAtRef.current = null;
     setRecording(false);
     setRecStart(null);
   }, []);
