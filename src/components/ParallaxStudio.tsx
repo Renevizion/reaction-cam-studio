@@ -903,24 +903,24 @@ export default function Compositor() {
         frameRate: { ideal: 60 },
       };
 
-      const exactVideo: MediaTrackConstraints = targetDeviceId
-        ? { ...baseVideo, deviceId: { exact: targetDeviceId } }
+      const preferredVideo: MediaTrackConstraints = targetDeviceId
+        ? { ...baseVideo, deviceId: { ideal: targetDeviceId } }
         : baseVideo;
 
       const requestedAudio: MediaTrackConstraints | boolean = selectedMicDeviceId === "none"
         ? false
         : selectedMicDeviceId
-          ? { deviceId: { exact: selectedMicDeviceId } }
+          ? { deviceId: { ideal: selectedMicDeviceId } }
           : true;
 
       const webcamAttempts: Array<{ reason: string; constraints: MediaStreamConstraints }> = [
-        { reason: "selected constraints", constraints: { video: exactVideo, audio: requestedAudio } },
+        { reason: "preferred constraints", constraints: { video: preferredVideo, audio: requestedAudio } },
       ];
 
       if (requestedAudio !== false) {
-        webcamAttempts.push({ reason: "camera with auto mic", constraints: { video: exactVideo, audio: true } });
+        webcamAttempts.push({ reason: "camera with auto mic", constraints: { video: preferredVideo, audio: true } });
       }
-      webcamAttempts.push({ reason: "camera only", constraints: { video: exactVideo, audio: false } });
+      webcamAttempts.push({ reason: "camera only", constraints: { video: preferredVideo, audio: false } });
 
       if (targetDeviceId) {
         webcamAttempts.push({ reason: "default camera + requested audio", constraints: { video: baseVideo, audio: requestedAudio } });
