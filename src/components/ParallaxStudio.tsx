@@ -2436,7 +2436,6 @@ http.createServer((req, res) => {
                     </button>
                     <button onClick={() => setShowCreatorTools(true)} className="rounded-full border border-white/10 bg-black/25 px-4 py-2 font-semibold transition hover:bg-white/[0.06]">Open Command Center</button>
                     <button onClick={() => setShowGallery(true)} className="rounded-full border border-white/10 bg-black/25 px-4 py-2 font-semibold transition hover:bg-white/[0.06]">Open Library</button>
-                    <button onClick={quickSavePreset} className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 font-semibold transition hover:bg-white/[0.06]">Save Preset</button>
                     <span className="rounded-full border border-white/10 bg-black/25 px-3 py-2 text-muted-foreground">Live path: {streamSummary}</span>
                   </div>
 
@@ -2444,60 +2443,19 @@ http.createServer((req, res) => {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary/80">Essential Controls</p>
-                        <p className="mt-1 text-xs text-muted-foreground">The actions you called out are now on the stage path instead of buried in the secondary panel.</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Primary actions now live in the Stage Dock so you can control the session without scrolling.</p>
                       </div>
-                      <span className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[10px] text-muted-foreground">No hunting</span>
+                      <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-1 text-[10px] text-emerald-200">Dock is primary</span>
                     </div>
-                    <div className="mt-3 space-y-2">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={togglePauseScreen}
-                          disabled={!screenReady && !screenPaused}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${screenPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
-                        >
-                          {screenPaused ? "Resume Screen" : "Pause Screen"}
-                        </button>
-                        <button
-                          onClick={togglePauseWebcam}
-                          disabled={!webcamReady && !webcamPaused}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${webcamPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
-                        >
-                          {webcamPaused ? "Resume Cam" : "Pause Cam"}
-                        </button>
-                        <button
-                          onClick={toggleBrbMode}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${brbActive ? "border-indigo-500 bg-indigo-500 text-white" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
-                        >
-                          {brbActive ? "Exit BRB" : "BRB"}
-                        </button>
+                    <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-3">
+                      <div className="flex flex-wrap gap-2 text-[11px]">
+                        <span className={`rounded-full border px-2.5 py-1 ${screenPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 text-muted-foreground"}`}>Screen {screenPaused ? "paused" : "live"}</span>
+                        <span className={`rounded-full border px-2.5 py-1 ${webcamPaused ? "border-amber-500 bg-amber-500 text-black" : "border-white/10 text-muted-foreground"}`}>Cam {webcamPaused ? "paused" : "live"}</span>
+                        <span className={`rounded-full border px-2.5 py-1 ${brbActive ? "border-indigo-500 bg-indigo-500 text-white" : "border-white/10 text-muted-foreground"}`}>BRB {brbActive ? "on" : "off"}</span>
+                        <span className="rounded-full border border-white/10 px-2.5 py-1 text-muted-foreground">Script {teleprompter.state.script.trim() ? "ready" : "empty"}</span>
+                        <span className="rounded-full border border-white/10 px-2.5 py-1 text-muted-foreground">Logo {logo.hasLogo ? "armed" : "off"}</span>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => setShowTeleprompterEditor(true)}
-                          className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/[0.06]"
-                        >
-                          {teleprompter.state.script.trim() ? "Script: Edit" : "Script: Add"}
-                        </button>
-                        <button
-                          onClick={() => setShowOverlayEditor(true)}
-                          className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/[0.06]"
-                        >
-                          {overlays.settings.socialLinks.some((link) => link.visible && link.handle.trim()) ? "Overlays: Edit" : "Overlays: Add"}
-                        </button>
-                        <button
-                          onClick={() => setShowLogoUploader(true)}
-                          className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/[0.06]"
-                        >
-                          {logo.hasLogo ? "Logo: Manage" : "Logo: Add"}
-                        </button>
-                        <button
-                          onClick={quickSavePreset}
-                          className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/[0.06]"
-                        >
-                          Preset: Save
-                        </button>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">Compact stage actions: no card-sized pause controls, one-tap access to script, overlays, logo, and preset save.</p>
+                      <p className="mt-2 text-[11px] text-muted-foreground">This panel is now status-only. Use the fixed Stage Dock below for instant controls.</p>
                     </div>
 
                     <div className="mt-3 grid gap-2 xl:grid-cols-2">
