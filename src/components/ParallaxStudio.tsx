@@ -1513,8 +1513,8 @@ http.createServer((req, res) => {
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0 flex-col xl:flex-row">
-        <aside className="w-full xl:w-[23rem] xl:shrink-0 border-b xl:border-b-0 xl:border-r border-white/10 bg-black/25 p-4 space-y-4 overflow-y-auto backdrop-blur-xl max-h-[52vh] xl:max-h-none">
+      <div className="flex flex-1 min-h-0 2xl:flex-row">
+        <aside className="hidden 2xl:block w-[22rem] shrink-0 border-r border-white/10 bg-black/25 p-4 space-y-4 overflow-y-auto backdrop-blur-xl">
           <section className={`${quickCardClassName} space-y-3`}>
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1969,46 +1969,88 @@ http.createServer((req, res) => {
           </section>
         </aside>
 
-        <main className="order-first xl:order-none flex-1 flex items-center justify-center p-4 md:p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)] min-w-0 min-h-[42vh] xl:min-h-0">
-          <div className="relative w-full max-w-full" style={{ aspectRatio: `${CANVAS_W}/${CANVAS_H}` }}>
-            <canvas ref={canvasRef} className="absolute inset-0 w-full h-full rounded-[28px] border border-white/10 shadow-[0_35px_120px_rgba(0,0,0,0.45)] bg-black" />
-            {showGuides && (
-              <div className="absolute inset-0 pointer-events-none">
-                <div
-                  className="absolute border border-emerald-400/40"
-                  style={{
-                    left: `${(SAFE_MARGIN / CANVAS_W) * 100}%`,
-                    top: `${(SAFE_MARGIN / CANVAS_H) * 100}%`,
-                    right: `${(SAFE_MARGIN / CANVAS_W) * 100}%`,
-                    bottom: `${(SAFE_MARGIN / CANVAS_H) * 100}%`,
-                  }}
-                />
-                <div className="absolute left-1/2 top-0 bottom-0 border-l border-white/10" />
-                <div className="absolute top-1/2 left-0 right-0 border-t border-white/10" />
+        <main className="flex-1 min-w-0 min-h-0 p-4 md:p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)]">
+          <div className="flex h-full flex-col gap-4">
+            <section className="2xl:hidden rounded-[24px] border border-white/10 bg-black/25 p-3 backdrop-blur-xl">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={screenReady ? stopScreen : startScreen}
+                  className={`rounded-xl px-3 py-2 text-sm transition ${screenReady ? "bg-primary text-primary-foreground" : "bg-card hover:bg-accent"}`}
+                >
+                  {screenReady ? "Stop Screen" : "Share Screen"}
+                </button>
+                <button
+                  onClick={webcamReady ? stopWebcam : startWebcam}
+                  className={`rounded-xl px-3 py-2 text-sm transition ${webcamReady ? "bg-primary text-primary-foreground" : "bg-card hover:bg-accent"}`}
+                >
+                  {webcamReady ? "Stop Webcam" : "Start Webcam"}
+                </button>
+                <button
+                  onClick={recording ? stopRecording : startRecording}
+                  disabled={!screenReady && !webcamReady}
+                  className={`rounded-xl px-3 py-2 text-sm transition disabled:opacity-40 ${recording ? "bg-destructive text-destructive-foreground" : "bg-card hover:bg-accent"}`}
+                >
+                  {recording ? `Stop Recording (${recLabel})` : "Start Recording"}
+                </button>
+                <button
+                  onClick={() => setShowCreatorTools(true)}
+                  className="rounded-xl bg-card px-3 py-2 text-sm transition hover:bg-accent"
+                >
+                  Open Full Controls
+                </button>
+                <div className="ml-auto text-[11px] text-muted-foreground">
+                  {screenReady ? "Screen ready" : "Screen idle"} · {webcamReady ? "Cam ready" : "Cam idle"}
+                </div>
               </div>
-            )}
-            <div
-              ref={overlayRef}
-              className="absolute inset-0"
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerCancel={onPointerUp}
-            >
-              {order.map((k) => (
-                <LayerHandles
-                  key={k}
-                  t={k === "screen" ? screenState : webcamState}
-                  selected={selected === k}
-                  label={k}
-                  color={k === "screen" ? "rgba(59,130,246,1)" : "rgba(236,72,153,1)"}
-                  locked={k === "screen" ? screenLocked : webcamLocked}
-                  // Alt held → topmost (last-rendered) layer becomes click-through so
-                  // you can grab the layer beneath instead of always the front one.
-                  interactive={!(altHeld && k === order[order.length - 1])}
-                  onSelect={() => setSelected(k)}
-                  onPointerDown={(e, mode, corner) => onPointerDownLayer(e, k, mode, corner)}
-                />
-              ))}
+            </section>
+
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <div
+                className="relative w-full max-w-full overflow-hidden rounded-[28px]"
+                style={{
+                  aspectRatio: `${CANVAS_W}/${CANVAS_H}`,
+                  maxHeight: "calc(100dvh - 11rem)",
+                  width: "min(100%, calc((100dvh - 11rem) * 16 / 9))",
+                }}
+              >
+                <canvas ref={canvasRef} className="absolute inset-0 w-full h-full rounded-[28px] border border-white/10 shadow-[0_35px_120px_rgba(0,0,0,0.45)] bg-black" />
+                {showGuides && (
+                  <div className="absolute inset-0 pointer-events-none">
+                    <div
+                      className="absolute border border-emerald-400/40"
+                      style={{
+                        left: `${(SAFE_MARGIN / CANVAS_W) * 100}%`,
+                        top: `${(SAFE_MARGIN / CANVAS_H) * 100}%`,
+                        right: `${(SAFE_MARGIN / CANVAS_W) * 100}%`,
+                        bottom: `${(SAFE_MARGIN / CANVAS_H) * 100}%`,
+                      }}
+                    />
+                    <div className="absolute left-1/2 top-0 bottom-0 border-l border-white/10" />
+                    <div className="absolute top-1/2 left-0 right-0 border-t border-white/10" />
+                  </div>
+                )}
+                <div
+                  ref={overlayRef}
+                  className="absolute inset-0"
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                  onPointerCancel={onPointerUp}
+                >
+                  {order.map((k) => (
+                    <LayerHandles
+                      key={k}
+                      t={k === "screen" ? screenState : webcamState}
+                      selected={selected === k}
+                      label={k}
+                      color={k === "screen" ? "rgba(59,130,246,1)" : "rgba(236,72,153,1)"}
+                      locked={k === "screen" ? screenLocked : webcamLocked}
+                      interactive={!(altHeld && k === order[order.length - 1])}
+                      onSelect={() => setSelected(k)}
+                      onPointerDown={(e, mode, corner) => onPointerDownLayer(e, k, mode, corner)}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </main>
