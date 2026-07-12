@@ -24,6 +24,29 @@ interface UseRecorderReturn {
   resumeRecording: () => void;
 }
 
+type RecorderQualityPreset = 'balanced' | 'high' | 'max';
+
+const QUALITY_BITS_PER_PIXEL: Record<RecorderQualityPreset, number> = {
+  balanced: 0.08,
+  high: 0.12,
+  max: 0.18,
+};
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const estimateRecorderBitrate = (width: number, height: number, fps: number, preset: RecorderQualityPreset) => {
+  const pixelsPerSecond = Math.max(1, width) * Math.max(1, height) * Math.max(1, fps);
+  const target = Math.round(pixelsPerSecond * QUALITY_BITS_PER_PIXEL[preset]);
+  return clamp(target, 5_000_000, 24_000_000);
+};
+
+const chooseRecorderPreset = (width: number, height: number, fps: number): RecorderQualityPreset => {
+  const workload = width * height * fps;
+  if (workload >= 1920 * 1080 * 60) return 'high';
+  if (workload >= 1920 * 1080 * 30) return 'max';
+  return 'max';
+};
+
 export function useRecorder(): UseRecorderReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -69,9 +92,13 @@ export function useRecorder(): UseRecorderReturn {
       const mimeType = getSupportedMimeType();
       const options: MediaRecorderOptions = {};
       if (mimeType) options.mimeType = mimeType;
-      // Request high bitrate to avoid laggy/compressed output
-      options.videoBitsPerSecond = 8_000_000; // 8 Mbps video for 1080p
-      options.audioBitsPerSecond = 256_000;   // 256 kbps audio for clean sound
+      const settings = videoTracks[0].getSettings();
+      const width = settings.width ?? 1920;
+      const height = settings.height ?? 1080;
+      const fps = Math.round(settings.frameRate ?? 30);
+      const preset = chooseRecorderPreset(width, height, fps);
+      options.videoBitsPerSecond = estimateRecorderBitrate(width, height, fps, preset);
+      options.audioBitsPerSecond = 256_000;
       const mediaRecorder = new MediaRecorder(recordingStream, options);
 
       mediaRecorder.ondataavailable = (e) => {

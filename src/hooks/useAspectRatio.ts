@@ -31,7 +31,7 @@ export const aspectRatioPresets: Record<AspectRatioPreset, AspectRatioConfig> = 
   '4:3': {
     label: '4:3',
     ratio: 4 / 3,
-    description: 'Classic',
+    description: 'Standard 4:3',
     icon: '📺',
   },
 };

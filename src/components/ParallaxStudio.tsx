@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImageSegmenter, FilesetResolver, type MPMask } from "@mediapipe/tasks-vision";
 import { Crop, Download, Eye, EyeOff, FileText, ImageIcon, LayoutPanelTop, PanelsTopLeft } from "lucide-react";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAspectRatio } from "@/hooks/useAspectRatio";
 import { useLogo } from "@/hooks/useLogo";
@@ -68,6 +69,7 @@ type Preset = {
 
 type BgTone = "black" | "studio" | "grid" | "aurora";
 type QualityTier = "high" | "medium" | "low";
+type RecordingQualityPreset = "balanced" | "high" | "max";
 
 const CANVAS_W = 1920;
 const CANVAS_H = 1080;
@@ -77,6 +79,51 @@ const PRESETS_KEY = "parallax-studio.presets.v1";
 const TEMPLATES_SEEDED_KEY = "parallax-studio.templates.seeded.v1";
 const CAPTURE_KIT_KEY = "parallax-studio.capture-kit.v1";
 const KICK_RTMPS_URL = "rtmps://fa723fc1b171.global-contribute.live-video.net/app/";
+const QUICK_START_DISMISSED_KEY = "scriptcam.quick-start.dismissed.v1";
+
+const RECORDING_QUALITY_BITS_PER_PIXEL: Record<RecordingQualityPreset, number> = {
+  balanced: 0.09,
+  high: 0.14,
+  max: 0.2,
+};
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const estimateVideoBitrate = (
+  width: number,
+  height: number,
+  fps: number,
+  preset: RecordingQualityPreset,
+) => {
+  const pixelsPerSecond = Math.max(1, width) * Math.max(1, height) * Math.max(1, fps);
+  const target = Math.round(pixelsPerSecond * RECORDING_QUALITY_BITS_PER_PIXEL[preset]);
+  return clamp(target, 6_000_000, 30_000_000);
+};
+
+const getPreferredRecorderMimeType = (candidates: string[]) =>
+  candidates.find((type) => MediaRecorder.isTypeSupported(type));
+
+const getRecordingProfile = (width: number, height: number, fps: number, preset: RecordingQualityPreset) => {
+  const videoBitsPerSecond = estimateVideoBitrate(width, height, fps, preset);
+  const audioBitsPerSecond = 320_000;
+  const mimeType = getPreferredRecorderMimeType([
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+  ]);
+
+  return {
+    width,
+    height,
+    fps,
+    preset,
+    mimeType,
+    videoBitsPerSecond,
+    audioBitsPerSecond,
+  };
+};
+
+const formatMegabits = (bitsPerSecond: number) => `${(bitsPerSecond / 1_000_000).toFixed(1)} Mbps`;
 
 const defaultScreen: Transform = {
   x: 120, y: 90, w: 1500, h: 844,
@@ -95,7 +142,7 @@ const QUALITY_SETTINGS: Record<QualityTier, { shadowBlur: number; scale: number;
 
 const BUILTIN_TEMPLATES: Omit<Preset, "id" | "createdAt">[] = [
   {
-    name: "★ Cinematic Parallax",
+    name: "★ Cinematic Studio",
     screen: { x: 90, y: 60, w: 1550, h: 872, rotation: -8, tiltX: 12, tiltY: -16, opacity: 0.9, scale: 1 },
     webcam: { x: 1080, y: 380, w: 760, h: 600, rotation: 3, tiltX: 2, tiltY: -2, opacity: 1, scale: 1 },
     order: ["screen", "webcam"], bgTone: "aurora", shadow: true, rounded: true, roundedRadius: 40,
@@ -218,7 +265,7 @@ export default function Compositor() {
   const [faceParallax, setFaceParallax] = useState(true);
   const [parallaxStrength, setParallaxStrength] = useState(60);
   // "screen-clipped" = full webcam always visible; cutout applied ONLY where screen overlaps
-  // "full-cutout"    = classic silhouette on top of screen; background disappears when inverted
+  // "full-cutout"    = silhouette on top of screen; background disappears when inverted
   const [segmentMode, setSegmentMode] = useState<"screen-clipped" | "full-cutout">("screen-clipped");
   const segmenterRef = useRef<ImageSegmenter | null>(null);
   const personCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -259,12 +306,22 @@ export default function Compositor() {
   // Streaming (local FFmpeg bridge)
   const [streamUrl, setStreamUrl] = useState(() => localStorage.getItem("parallax.streamUrl") || "");
   const [streamKey, setStreamKey] = useState(() => localStorage.getItem("parallax.streamKey") || "");
-  const [streamBitrate, setStreamBitrate] = useState(6000);
-  const [streamFps, setStreamFps] = useState(60);
+  const [streamBitrate, setStreamBitrate] = useState(() => {
+    const stored = Number(localStorage.getItem("parallax.streamBitrate"));
+    return Number.isFinite(stored) && stored > 0 ? stored : 9000;
+  });
+  const [streamFps, setStreamFps] = useState(() => {
+    const stored = Number(localStorage.getItem("parallax.streamFps"));
+    return stored === 30 || stored === 60 ? stored : 60;
+  });
   const [streamKeyframe, setStreamKeyframe] = useState(2);
   const [bridgePort, setBridgePort] = useState(9999);
   const [streaming, setStreaming] = useState(false);
   const [streamStatus, setStreamStatus] = useState<string>("");
+  const [recordingQualityPreset, setRecordingQualityPreset] = useState<RecordingQualityPreset>(() => {
+    const stored = localStorage.getItem("parallax.recordingQuality");
+    return stored === "balanced" || stored === "high" || stored === "max" ? stored : "high";
+  });
   const streamRecRef = useRef<MediaRecorder | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
   const logoImageRef = useRef<HTMLImageElement | null>(null);
@@ -286,8 +343,13 @@ export default function Compositor() {
     }
   });
   const [capturePreviewVisible, setCapturePreviewVisible] = useState(true);
+  const [quickStartDismissed, setQuickStartDismissed] = useState(() => localStorage.getItem(QUICK_START_DISMISSED_KEY) === "1");
   useEffect(() => { localStorage.setItem("parallax.streamUrl", streamUrl); }, [streamUrl]);
   useEffect(() => { localStorage.setItem("parallax.streamKey", streamKey); }, [streamKey]);
+  useEffect(() => { localStorage.setItem("parallax.streamBitrate", String(streamBitrate)); }, [streamBitrate]);
+  useEffect(() => { localStorage.setItem("parallax.streamFps", String(streamFps)); }, [streamFps]);
+  useEffect(() => { localStorage.setItem("parallax.recordingQuality", recordingQualityPreset); }, [recordingQualityPreset]);
+  useEffect(() => { localStorage.setItem(QUICK_START_DISMISSED_KEY, quickStartDismissed ? "1" : "0"); }, [quickStartDismissed]);
 
   useEffect(() => {
     teleprompterOffsetRef.current = 0;
@@ -517,8 +579,13 @@ export default function Compositor() {
     try {
       setError(null);
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: true,
+        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          sampleRate: { ideal: 48000 },
+        },
       });
       webcamStreamRef.current = stream;
       const v = webcamVideoRef.current!;
@@ -1044,7 +1111,7 @@ export default function Compositor() {
           ctx.restore();
         }
       } else if (useSegmentedWebcam) {
-        // Classic: screen behind, silhouette in front (no background)
+        // Full cutout: screen behind, silhouette in front (no background)
         drawScreen();
         drawWebcamCutout();
       } else {
@@ -1249,12 +1316,14 @@ export default function Compositor() {
     if (!canvas) { setStreamStatus("Canvas not ready"); return; }
     const stream = canvas.captureStream(streamFps);
     webcamStreamRef.current?.getAudioTracks().forEach((t) => stream.addTrack(t));
-    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
-      ? "video/webm;codecs=vp8,opus"
-      : "video/webm";
+    const mime = getPreferredRecorderMimeType(["video/webm;codecs=vp8,opus", "video/webm"]);
     let rec: MediaRecorder;
     try {
-      rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: streamBitrate * 1000 });
+      rec = new MediaRecorder(stream, {
+        ...(mime ? { mimeType: mime } : {}),
+        videoBitsPerSecond: streamBitrate * 1000,
+        audioBitsPerSecond: 256_000,
+      });
     } catch (e) {
       setStreamStatus("MediaRecorder init failed: " + (e instanceof Error ? e.message : "unknown"));
       return;
@@ -1398,16 +1467,18 @@ http.createServer((req, res) => {
   const startRecording = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const stream = canvas.captureStream(60);
+    const recordingProfile = getRecordingProfile(CANVAS_W, CANVAS_H, 60, recordingQualityPreset);
+    const stream = canvas.captureStream(recordingProfile.fps);
     webcamStreamRef.current?.getAudioTracks().forEach((t) => stream.addTrack(t));
-    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-      ? "video/webm;codecs=vp9"
-      : "video/webm";
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    const rec = new MediaRecorder(stream, {
+      ...(recordingProfile.mimeType ? { mimeType: recordingProfile.mimeType } : {}),
+      videoBitsPerSecond: recordingProfile.videoBitsPerSecond,
+      audioBitsPerSecond: recordingProfile.audioBitsPerSecond,
+    });
     recordedChunksRef.current = [];
     rec.ondataavailable = (e) => e.data.size > 0 && recordedChunksRef.current.push(e.data);
     rec.onstop = () => {
-      const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
+      const blob = new Blob(recordedChunksRef.current, { type: rec.mimeType || recordingProfile.mimeType || "video/webm" });
       const url = URL.createObjectURL(blob);
       const recording: Recording = {
         id: `parallax-${Date.now()}`,
@@ -1424,7 +1495,7 @@ http.createServer((req, res) => {
     setRecording(true);
     setRecStart(Date.now());
     setRecElapsed(0);
-  }, [addRecording]);
+  }, [addRecording, recordingQualityPreset]);
 
   const stopRecording = useCallback(() => {
     recorderRef.current?.stop();
@@ -1499,6 +1570,10 @@ http.createServer((req, res) => {
   const fpsState: "good" | "warn" | "bad" =
     fps >= 50 ? "good" : fps >= 30 ? "warn" : "bad";
   const fpsColor = fpsState === "good" ? "bg-emerald-500" : fpsState === "warn" ? "bg-amber-500" : "bg-red-500";
+  const recordingProfile = useMemo(
+    () => getRecordingProfile(CANVAS_W, CANVAS_H, 60, recordingQualityPreset),
+    [recordingQualityPreset],
+  );
 
   const outOfSafe = useMemo(() => {
     const bad = (t: Transform) =>
@@ -1513,6 +1588,29 @@ http.createServer((req, res) => {
   const recLabel = `${String(Math.floor(recSecs / 60)).padStart(2, "0")}:${String(recSecs % 60).padStart(2, "0")}`;
   const sectionClassName = "rounded-[28px] border border-white/10 bg-black/25 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.22)] backdrop-blur-xl";
   const quickCardClassName = "rounded-[28px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_10px_30px_rgba(0,0,0,0.18)]";
+  const heroCardClassName = "rounded-[32px] border border-white/10 bg-[linear-gradient(145deg,rgba(10,12,18,0.96),rgba(10,12,18,0.8))] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.35)] backdrop-blur-2xl";
+  const sourceReadyCount = Number(screenReady) + Number(webcamReady);
+  const studioModeLabel = recording ? "Recording" : streaming ? "Live" : sourceReadyCount > 0 ? "Ready" : "Standby";
+  const studioModeTone = recording
+    ? "bg-destructive text-destructive-foreground"
+    : streaming
+      ? "bg-emerald-500 text-black"
+      : sourceReadyCount > 0
+        ? "bg-primary text-primary-foreground"
+        : "bg-white/10 text-muted-foreground";
+  const sourceSummary = sourceReadyCount === 2 ? "screen + cam armed" : sourceReadyCount === 1 ? "one source armed" : "no live source yet";
+  const recordingSummary = `${recordingProfile.width}×${recordingProfile.height} · ${recordingProfile.fps}fps · ${formatMegabits(recordingProfile.videoBitsPerSecond)}`;
+  const streamSummary = `${streamFps}fps · ${(streamBitrate / 1000).toFixed(1)} Mbps bridge target`;
+  const frontLayer = order[1];
+  const needsQuickStart =
+    !quickStartDismissed &&
+    !screenReady &&
+    !webcamReady &&
+    !recording &&
+    !streaming &&
+    recordings.length === 0 &&
+    !teleprompter.state.script.trim() &&
+    !logo.hasLogo;
   const studioControlSections = (
     <>
       <section className={`${sectionClassName} space-y-2`}>
@@ -1647,14 +1745,26 @@ http.createServer((req, res) => {
           <label className="flex flex-col gap-0.5"><span className="text-muted-foreground">bitrate k</span><input type="number" value={streamBitrate} onChange={(e) => setStreamBitrate(Number(e.target.value))} className="bg-input rounded px-1 py-1 border border-border" /></label>
           <label className="flex flex-col gap-0.5"><span className="text-muted-foreground">keyframe s</span><input type="number" value={streamKeyframe} onChange={(e) => setStreamKeyframe(Number(e.target.value))} className="bg-input rounded px-1 py-1 border border-border" /></label>
         </div>
+        <div className="flex flex-wrap gap-1 text-[11px]">
+          {[6000, 9000, 12000].map((preset) => (
+            <button
+              key={preset}
+              onClick={() => setStreamBitrate(preset)}
+              className={`rounded px-2 py-1 border ${streamBitrate === preset ? "bg-accent border-primary" : "bg-card border-border"}`}
+            >
+              {preset / 1000} Mbps
+            </button>
+          ))}
+        </div>
         <label className="flex items-center gap-2 text-[11px]"><span className="text-muted-foreground">Bridge port</span><input type="number" value={bridgePort} onChange={(e) => setBridgePort(Number(e.target.value))} className="w-20 bg-input rounded px-1 py-0.5 border border-border" /></label>
         <button onClick={streaming ? stopStream : startStream} disabled={!screenReady && !webcamReady} className={`w-full text-sm rounded-md px-3 py-2 border transition disabled:opacity-40 ${streaming ? "bg-destructive text-destructive-foreground border-destructive animate-pulse" : "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600"}`}>
           {streaming ? "■ Stop Stream" : "● Go Live via Local Bridge"}
         </button>
         {streamStatus && <p className="text-[10px] font-mono text-muted-foreground break-words">{streamStatus}</p>}
         <p className="text-[10px] text-muted-foreground leading-relaxed">
-          Kick test flow: download and run the local bridge, paste your Kick stream key, then start Parallax streaming from this panel.
+          Kick test flow: download and run the local bridge, paste your Kick stream key, then start studio streaming from this panel.
         </p>
+        <p className="text-[10px] text-muted-foreground">Live target: {CANVAS_W}×{CANVAS_H} · {streamFps}fps · {(streamBitrate / 1000).toFixed(1)} Mbps to bridge</p>
       </section>
 
       <section className={`${sectionClassName} space-y-2`}>
@@ -1739,10 +1849,23 @@ http.createServer((req, res) => {
 
       <section className={`${sectionClassName} space-y-2`}>
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Output</h2>
+        <div className="grid grid-cols-3 gap-1 text-xs">
+          {(["balanced", "high", "max"] as const).map((preset) => (
+            <button
+              key={preset}
+              onClick={() => setRecordingQualityPreset(preset)}
+              className={`rounded px-2 py-1 border capitalize ${recordingQualityPreset === preset ? "bg-accent border-primary" : "bg-card border-border"}`}
+            >
+              {preset}
+            </button>
+          ))}
+        </div>
         <button onClick={recording ? stopRecording : startRecording} disabled={!screenReady && !webcamReady} className={`w-full text-sm rounded-md px-3 py-2 border transition disabled:opacity-50 ${recording ? "bg-destructive text-destructive-foreground border-destructive animate-pulse" : "bg-card hover:bg-accent border-border"}`}>
           {recording ? `■ Stop & Download (${recLabel})` : "● Start Recording"}
         </button>
-        <p className="text-[10px] text-muted-foreground">WebM VP9 · 60fps target · what you see = what encodes</p>
+        <p className="text-[10px] text-muted-foreground">
+          {recordingProfile.mimeType?.includes("vp9") ? "WebM VP9" : "WebM"} · {recordingProfile.width}×{recordingProfile.height} · {recordingProfile.fps}fps target · {formatMegabits(recordingProfile.videoBitsPerSecond)} video
+        </p>
       </section>
 
       <section className={`${sectionClassName} space-y-1 text-[11px] text-muted-foreground leading-relaxed`}>
@@ -1762,20 +1885,23 @@ http.createServer((req, res) => {
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary via-primary to-destructive shadow-lg shadow-primary/20" />
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold leading-none">ScriptCam Parallax</h1>
+              <h1 className="text-lg font-semibold leading-none">ScriptCam Studio</h1>
               <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
-                Primary Studio
+                One Surface
               </span>
             </div>
-            <p className="text-xs text-muted-foreground">Free-form screen + webcam compositor with layered creator tools</p>
+            <p className="text-xs text-muted-foreground">Fast screen, camera, recording, streaming, overlays, and local capture in one studio.</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className={`rounded-full px-2.5 py-1 font-semibold uppercase tracking-[0.18em] ${studioModeTone}`}>
+            {studioModeLabel}
+          </span>
           <button
             onClick={() => setShowCreatorTools(true)}
             className="rounded-xl border border-border bg-card px-3 py-2 text-foreground transition hover:bg-accent hover:text-accent-foreground"
           >
-            Studio Drawer
+            Command Center
           </button>
           <button
             onClick={() => setShowGallery(true)}
@@ -1829,14 +1955,14 @@ http.createServer((req, res) => {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Primary Workflow</p>
-                <h2 className="mt-1 text-base font-semibold text-foreground">ScriptCam Parallax Studio</h2>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Keep the scene builder here, then pull in the older recorder tools only when they add value.</p>
+                <h2 className="mt-1 text-base font-semibold text-foreground">ScriptCam Studio</h2>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Operate the shot here, then reach for deeper controls only when you need extra authority.</p>
               </div>
               <button
                 onClick={() => setShowCreatorTools(true)}
                 className="rounded-2xl border border-primary/30 bg-primary/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary transition hover:bg-primary hover:text-primary-foreground"
               >
-                Open Tools
+                Open Center
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -1855,42 +1981,146 @@ http.createServer((req, res) => {
 
         <main className="flex-1 min-w-0 min-h-0 p-4 md:p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)]">
           <div className="flex h-full flex-col gap-4">
-            <section className="2xl:hidden rounded-[24px] border border-white/10 bg-black/25 p-3 backdrop-blur-xl">
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={screenReady ? stopScreen : startScreen}
-                  className={`rounded-xl px-3 py-2 text-sm transition ${screenReady ? "bg-primary text-primary-foreground" : "bg-card hover:bg-accent"}`}
-                >
-                  {screenReady ? "Stop Screen" : "Share Screen"}
-                </button>
-                <button
-                  onClick={webcamReady ? stopWebcam : startWebcam}
-                  className={`rounded-xl px-3 py-2 text-sm transition ${webcamReady ? "bg-primary text-primary-foreground" : "bg-card hover:bg-accent"}`}
-                >
-                  {webcamReady ? "Stop Webcam" : "Start Webcam"}
-                </button>
-                <button
-                  onClick={recording ? stopRecording : startRecording}
-                  disabled={!screenReady && !webcamReady}
-                  className={`rounded-xl px-3 py-2 text-sm transition disabled:opacity-40 ${recording ? "bg-destructive text-destructive-foreground" : "bg-card hover:bg-accent"}`}
-                >
-                  {recording ? `Stop Recording (${recLabel})` : "Start Recording"}
-                </button>
-                <button
-                  onClick={() => setShowCreatorTools(true)}
-                  className="rounded-xl bg-card px-3 py-2 text-sm transition hover:bg-accent"
-                >
-                  Open Studio Drawer
-                </button>
-                <button
-                  onClick={() => setShowGallery(true)}
-                  className="rounded-xl bg-card px-3 py-2 text-sm transition hover:bg-accent"
-                >
-                  Library {recordings.length > 0 ? `(${recordings.length})` : ""}
-                </button>
-                <div className="ml-auto text-[11px] text-muted-foreground">
-                  {screenReady ? "Screen ready" : "Screen idle"} · {webcamReady ? "Cam ready" : "Cam idle"}
+            <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className={`${heroCardClassName} relative overflow-hidden`}>
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(239,68,68,0.18),transparent_28%),radial-gradient(circle_at_85%_20%,rgba(59,130,246,0.18),transparent_30%)]" />
+                <div className="relative">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="max-w-xl">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-primary/80">Launch Pad</p>
+                      <h2 className="mt-2 text-2xl font-semibold leading-tight text-foreground">Stay inside the shot. Everything critical is one move away.</h2>
+                      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Arm sources, record, go live, and open deeper controls without leaving the stage. The studio should feel as fast as Loom, as clear as StreamYard, and as dependable as OBS.</p>
+                    </div>
+                    <div className="rounded-[24px] border border-white/10 bg-black/25 px-4 py-3 text-right shadow-[0_18px_60px_rgba(0,0,0,0.2)]">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">Session State</p>
+                      <p className="mt-2 text-lg font-semibold text-foreground">{studioModeLabel}</p>
+                      <p className="text-xs text-muted-foreground">{sourceSummary}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <button
+                      onClick={screenReady ? stopScreen : startScreen}
+                      className={`rounded-[24px] border px-4 py-4 text-left transition ${screenReady ? "border-primary bg-primary text-primary-foreground shadow-[0_18px_50px_rgba(220,38,38,0.35)]" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                    >
+                      <p className="text-[11px] uppercase tracking-[0.22em] opacity-80">Source 01</p>
+                      <p className="mt-2 text-base font-semibold">{screenReady ? "Screen connected" : "Share your screen"}</p>
+                      <p className="mt-1 text-xs opacity-75">{screenMeta || "Bring your app, browser, or desktop into the scene."}</p>
+                    </button>
+                    <button
+                      onClick={webcamReady ? stopWebcam : startWebcam}
+                      className={`rounded-[24px] border px-4 py-4 text-left transition ${webcamReady ? "border-primary bg-primary text-primary-foreground shadow-[0_18px_50px_rgba(220,38,38,0.35)]" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                    >
+                      <p className="text-[11px] uppercase tracking-[0.22em] opacity-80">Source 02</p>
+                      <p className="mt-2 text-base font-semibold">{webcamReady ? "Camera connected" : "Start your camera"}</p>
+                      <p className="mt-1 text-xs opacity-75">{webcamMeta || "Bring yourself into frame with 1080p capture and clean audio."}</p>
+                    </button>
+                    <button
+                      onClick={recording ? stopRecording : startRecording}
+                      disabled={!screenReady && !webcamReady}
+                      className={`rounded-[24px] border px-4 py-4 text-left transition disabled:opacity-40 ${recording ? "border-destructive bg-destructive text-destructive-foreground shadow-[0_18px_50px_rgba(220,38,38,0.35)]" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                    >
+                      <p className="text-[11px] uppercase tracking-[0.22em] opacity-80">Capture</p>
+                      <p className="mt-2 text-base font-semibold">{recording ? `Recording ${recLabel}` : "Start recording"}</p>
+                      <p className="mt-1 text-xs opacity-75">{recording ? "The final file mirrors the live canvas output." : recordingSummary}</p>
+                    </button>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px]">
+                    <button
+                      onClick={streaming ? stopStream : startStream}
+                      disabled={!screenReady && !webcamReady}
+                      className={`rounded-full px-4 py-2 font-semibold transition disabled:opacity-40 ${streaming ? "bg-emerald-500 text-black" : "border border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
+                    >
+                      {streaming ? "Stop Live" : "Go Live"}
+                    </button>
+                    <button onClick={() => setShowCreatorTools(true)} className="rounded-full border border-white/10 bg-black/25 px-4 py-2 font-semibold transition hover:bg-white/[0.06]">Open Command Center</button>
+                    <button onClick={() => setShowGallery(true)} className="rounded-full border border-white/10 bg-black/25 px-4 py-2 font-semibold transition hover:bg-white/[0.06]">Open Library</button>
+                    <span className="rounded-full border border-white/10 bg-black/25 px-3 py-2 text-muted-foreground">Live path: {streamSummary}</span>
+                  </div>
+
+                  {needsQuickStart && (
+                    <div className="mt-5 rounded-[28px] border border-primary/20 bg-primary/10 p-4 shadow-[0_18px_50px_rgba(220,38,38,0.12)]">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="max-w-2xl">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Quick Start</p>
+                          <h3 className="mt-2 text-lg font-semibold text-foreground">Three moves to your first clean take.</h3>
+                          <p className="mt-1 text-sm text-muted-foreground">Start with the live inputs, then record. Add script, watermark, or overlays only if they help the shot.</p>
+                        </div>
+                        <button
+                          onClick={() => setQuickStartDismissed(true)}
+                          className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground transition hover:bg-white/[0.06] hover:text-foreground"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                      <div className="mt-4 grid gap-3 md:grid-cols-3">
+                        <button onClick={startScreen} className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-4 text-left transition hover:bg-white/[0.06]">
+                          <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Step 1</p>
+                          <p className="mt-2 font-semibold text-foreground">Share screen</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Bring the app, deck, or browser tab you want on stage.</p>
+                        </button>
+                        <button onClick={startWebcam} className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-4 text-left transition hover:bg-white/[0.06]">
+                          <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Step 2</p>
+                          <p className="mt-2 font-semibold text-foreground">Start camera</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Layer yourself into frame with the default 1080p capture path.</p>
+                        </button>
+                        <button
+                          onClick={startRecording}
+                          disabled={!screenReady && !webcamReady}
+                          className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-4 text-left transition hover:bg-white/[0.06] disabled:opacity-40"
+                        >
+                          <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Step 3</p>
+                          <p className="mt-2 font-semibold text-foreground">Record take</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Capture the exact live canvas once your source stack looks right.</p>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
+              </div>
+
+              <div className="grid gap-4">
+                <section className={heroCardClassName}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Session Pulse</p>
+                      <h3 className="mt-2 text-lg font-semibold text-foreground">Know the state without digging.</h3>
+                    </div>
+                    <div className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] text-muted-foreground">{currentConfig.label}</div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-4">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Performance</p>
+                      <p className="mt-2 text-2xl font-semibold text-foreground">{fps} fps</p>
+                      <p className="text-xs text-muted-foreground">Peak frame {frameMs}ms · quality {quality}</p>
+                    </div>
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-4">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Sources</p>
+                      <p className="mt-2 text-2xl font-semibold text-foreground">{sourceReadyCount}/2</p>
+                      <p className="text-xs text-muted-foreground">{screenReady ? "Screen armed" : "Screen idle"} · {webcamReady ? "Cam armed" : "Cam idle"}</p>
+                    </div>
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-4">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Selected Layer</p>
+                      <p className="mt-2 text-2xl font-semibold capitalize text-foreground">{selected}</p>
+                      <p className="text-xs text-muted-foreground">Front layer: {frontLayer} {outOfSafe[selected] ? "· outside safe area" : "· inside safe area"}</p>
+                    </div>
+                    <div className="rounded-[22px] border border-white/10 bg-black/25 p-4">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Capture</p>
+                      <p className="mt-2 text-lg font-semibold text-foreground capitalize">{recordingQualityPreset}</p>
+                      <p className="text-xs text-muted-foreground">{recordingSummary}</p>
+                    </div>
+                  </div>
+                </section>
+
+                <section className={heroCardClassName}>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Operator Notes</p>
+                  <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                    <p>What the audience sees is what encodes. Recordings are saved from the live canvas, not a hidden alternate layout.</p>
+                    <p>Teleprompter, overlays, sound cues, watermark, and local capture exports all stay inside this one studio surface.</p>
+                    <p>Use <span className="text-foreground">Tab</span> to switch layers, <span className="text-foreground">[ ]</span> to rotate, and open the Command Center for deeper scene control.</p>
+                  </div>
+                </section>
               </div>
             </section>
 
@@ -1904,6 +2134,24 @@ http.createServer((req, res) => {
                 }}
               >
                 <canvas ref={canvasRef} className="absolute inset-0 w-full h-full rounded-[28px] border border-white/10 shadow-[0_35px_120px_rgba(0,0,0,0.45)] bg-black" />
+                <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-start justify-between gap-3 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] shadow-[0_18px_40px_rgba(0,0,0,0.28)] ${studioModeTone}`}>
+                      {studioModeLabel}
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] text-white/90 shadow-[0_18px_40px_rgba(0,0,0,0.28)]">
+                      {screenReady ? "Screen ready" : "Screen idle"} · {webcamReady ? "Cam ready" : "Cam idle"}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] text-white/90 shadow-[0_18px_40px_rgba(0,0,0,0.28)]">
+                      {currentConfig.label} guide
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] text-white/90 shadow-[0_18px_40px_rgba(0,0,0,0.28)]">
+                      {recordingSummary}
+                    </span>
+                  </div>
+                </div>
                 {showGuides && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div
@@ -1950,6 +2198,36 @@ http.createServer((req, res) => {
                     />
                   ))}
                 </div>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-end justify-between gap-3 p-4">
+                  <div className="flex flex-wrap gap-2">
+                    <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] text-white/90 shadow-[0_18px_40px_rgba(0,0,0,0.28)] capitalize">
+                      selected · {selected}
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] text-white/90 shadow-[0_18px_40px_rgba(0,0,0,0.28)] capitalize">
+                      front · {frontLayer}
+                    </span>
+                    {teleprompter.state.script.trim() && (
+                      <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] text-white/90 shadow-[0_18px_40px_rgba(0,0,0,0.28)]">
+                        Teleprompter {teleprompter.state.isVisible ? "live" : "loaded"}
+                      </span>
+                    )}
+                    {logo.hasLogo && (
+                      <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] text-white/90 shadow-[0_18px_40px_rgba(0,0,0,0.28)]">
+                        Watermark armed
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] text-white/90 shadow-[0_18px_40px_rgba(0,0,0,0.28)]">
+                      {fps} fps · {frameMs}ms peak
+                    </span>
+                    {recording && (
+                      <span className="rounded-full bg-destructive px-3 py-1 text-[11px] font-semibold text-destructive-foreground shadow-[0_18px_40px_rgba(220,38,38,0.28)]">
+                        REC {recLabel}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1963,8 +2241,8 @@ http.createServer((req, res) => {
               <div className="flex items-center gap-3">
                 <div className="rounded-2xl bg-primary/10 p-3 text-primary"><PanelsTopLeft className="h-5 w-5" /></div>
                 <div>
-                  <SheetTitle>Studio Drawer</SheetTitle>
-                  <SheetDescription>Full Parallax controls on normal screens, with creator tools and local capture exports below.</SheetDescription>
+                  <SheetTitle>Command Center</SheetTitle>
+                  <SheetDescription>Deep scene, capture, streaming, and creator controls without leaving the main studio surface.</SheetDescription>
                 </div>
               </div>
             </SheetHeader>
@@ -1974,138 +2252,171 @@ http.createServer((req, res) => {
                 {studioControlSections}
               </section>
 
+              <section className="sticky top-0 z-10 -mx-1 rounded-[28px] border border-white/10 bg-[#0a0c12]/95 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={() => setShowTeleprompterEditor(true)} className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90">Script</button>
+                  <button onClick={() => setShowOverlayEditor(true)} className="rounded-full border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Overlay</button>
+                  <button onClick={() => setShowLogoUploader(true)} className="rounded-full border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Logo</button>
+                  <button onClick={() => setShowGallery(true)} className="rounded-full border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Library</button>
+                  <button onClick={() => setShowAspectRatio(true)} className="rounded-full border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Framing</button>
+                  <span className="ml-auto text-[11px] text-muted-foreground">Command Center keeps the deeper controls nearby without crowding the stage.</span>
+                </div>
+              </section>
+
               <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
                 <div className="flex items-start gap-4">
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Legacy Tools</p>
-                    <h3 className="mt-1 text-lg font-semibold">Use the best parts, not the whole old flow</h3>
-                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Teleprompter and watermark already live inside the Parallax output. Remaining legacy pieces still need to be ported into this drawer instead of sending you to a different page.</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Studio Toolkit</p>
+                    <h3 className="mt-1 text-lg font-semibold">Keep the shot moving. Open details only when they help.</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Script, branding, overlays, recordings, and local capture stay in this one studio. The panels below are grouped so the stage stays the priority.</p>
                   </div>
                 </div>
               </section>
 
-              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-2xl bg-primary/10 p-3 text-primary"><FileText className="h-5 w-5" /></div>
-                  <div>
-                    <h3 className="text-base font-semibold">Script Teleprompter</h3>
-                    <p className="text-sm text-muted-foreground">Edit the script with the familiar composer, then run it directly inside the scene output.</p>
-                  </div>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <button onClick={() => setShowTeleprompterEditor(true)} className="rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90">Edit Script</button>
-                  <button onClick={() => teleprompter.toggleVisible()} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">{teleprompter.state.isVisible ? "Hide Prompt" : "Show Prompt"}</button>
-                  <button onClick={handleTeleprompterReset} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Reset Scroll</button>
-                </div>
-              </section>
+              <Accordion type="multiple" defaultValue={["teleprompter", "utilities", "branding"]} className="space-y-4">
+                <AccordionItem value="teleprompter" className="rounded-[28px] border border-white/10 bg-white/[0.03] px-5">
+                  <AccordionTrigger className="py-5 text-left text-base font-semibold text-foreground hover:no-underline">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-2xl bg-primary/10 p-3 text-primary"><FileText className="h-5 w-5" /></div>
+                      <div>
+                        <div>Script Teleprompter</div>
+                        <div className="mt-1 text-sm font-normal text-muted-foreground">Edit the script, show it on stage, and reset it without leaving the studio.</div>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="flex flex-wrap gap-3 pt-1">
+                      <button onClick={() => setShowTeleprompterEditor(true)} className="rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90">Edit Script</button>
+                      <button onClick={() => teleprompter.toggleVisible()} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">{teleprompter.state.isVisible ? "Hide Prompt" : "Show Prompt"}</button>
+                      <button onClick={handleTeleprompterReset} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Reset Scroll</button>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
 
-              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-2xl bg-primary/10 p-3 text-primary"><LayoutPanelTop className="h-5 w-5" /></div>
-                  <div>
-                    <h3 className="text-base font-semibold">In-Flow Studio Utilities</h3>
-                    <p className="text-sm text-muted-foreground">These were living on the old page. They now stay inside Parallax so you can monitor and adjust without context-switching.</p>
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <button onClick={() => setShowOverlayEditor(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
-                    <div className="font-medium">Social Overlay Editor</div>
-                    <div className="mt-1 text-xs text-muted-foreground">Edit creator handles rendered into the Parallax output.</div>
-                  </button>
-                  <button onClick={() => setShowAspectRatio(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
-                    <div className="font-medium">Framing Guide</div>
-                    <div className="mt-1 text-xs text-muted-foreground">Current guide: {currentConfig.label} · {currentConfig.description}</div>
-                  </button>
-                  <button onClick={() => setShowSoundEffects(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
-                    <div className="font-medium">Sound Effects</div>
-                    <div className="mt-1 text-xs text-muted-foreground">Play quick audience and emphasis sounds during recording.</div>
-                  </button>
-                  <button onClick={() => setShowGallery(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
-                    <div className="font-medium">Recordings Library</div>
-                    <div className="mt-1 text-xs text-muted-foreground">Review, download, share, or delete takes without leaving Parallax.</div>
-                  </button>
-                </div>
-              </section>
+                <AccordionItem value="utilities" className="rounded-[28px] border border-white/10 bg-white/[0.03] px-5">
+                  <AccordionTrigger className="py-5 text-left text-base font-semibold text-foreground hover:no-underline">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-2xl bg-primary/10 p-3 text-primary"><LayoutPanelTop className="h-5 w-5" /></div>
+                      <div>
+                        <div>In-Flow Studio Utilities</div>
+                        <div className="mt-1 text-sm font-normal text-muted-foreground">Open the most-used supporting tools without changing surfaces.</div>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="grid gap-3 sm:grid-cols-2 pt-1">
+                      <button onClick={() => setShowOverlayEditor(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
+                        <div className="font-medium">Social Overlay Editor</div>
+                        <div className="mt-1 text-xs text-muted-foreground">Edit creator handles rendered into the studio output.</div>
+                      </button>
+                      <button onClick={() => setShowAspectRatio(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
+                        <div className="font-medium">Framing Guide</div>
+                        <div className="mt-1 text-xs text-muted-foreground">Current guide: {currentConfig.label} · {currentConfig.description}</div>
+                      </button>
+                      <button onClick={() => setShowSoundEffects(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
+                        <div className="font-medium">Sound Effects</div>
+                        <div className="mt-1 text-xs text-muted-foreground">Play quick audience and emphasis sounds during recording.</div>
+                      </button>
+                      <button onClick={() => setShowGallery(true)} className="rounded-2xl border border-white/10 bg-card px-4 py-3 text-left transition hover:bg-accent">
+                        <div className="font-medium">Recordings Library</div>
+                        <div className="mt-1 text-xs text-muted-foreground">Review, download, share, or delete takes without leaving the studio.</div>
+                      </button>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
 
-              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-2xl bg-primary/10 p-3 text-primary"><ImageIcon className="h-5 w-5" /></div>
-                  <div>
-                    <h3 className="text-base font-semibold">Brand Watermark</h3>
-                    <p className="text-sm text-muted-foreground">Use the original uploader to pin a logo into the exported frame.</p>
-                  </div>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <button onClick={() => setShowLogoUploader(true)} className="rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90">Manage Logo</button>
-                  {logo.hasLogo && (
-                    <button onClick={logo.removeLogo} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Remove Logo</button>
-                  )}
-                </div>
-              </section>
+                <AccordionItem value="branding" className="rounded-[28px] border border-white/10 bg-white/[0.03] px-5">
+                  <AccordionTrigger className="py-5 text-left text-base font-semibold text-foreground hover:no-underline">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-2xl bg-primary/10 p-3 text-primary"><ImageIcon className="h-5 w-5" /></div>
+                      <div>
+                        <div>Brand Watermark</div>
+                        <div className="mt-1 text-sm font-normal text-muted-foreground">Pin your logo into the exported frame only when the take needs it.</div>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="flex flex-wrap gap-3 pt-1">
+                      <button onClick={() => setShowLogoUploader(true)} className="rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90">Manage Logo</button>
+                      {logo.hasLogo && (
+                        <button onClick={logo.removeLogo} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Remove Logo</button>
+                      )}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
 
-              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
+                <AccordionItem value="capture" className="rounded-[28px] border border-white/10 bg-white/[0.03] px-5">
+                  <AccordionTrigger className="py-5 text-left text-base font-semibold text-foreground hover:no-underline">
                     <div className="flex items-center gap-3">
                       <div className="rounded-2xl bg-primary/10 p-3 text-primary"><Crop className="h-5 w-5" /></div>
                       <div>
-                        <h3 className="text-base font-semibold">Local Capture Kit</h3>
-                        <p className="text-sm text-muted-foreground">Pulled from the silent-region recorder: fixed pixel region presets plus downloadable local Mac and Windows starter kits.</p>
+                        <div>Local Capture Kit</div>
+                        <div className="mt-1 text-sm font-normal text-muted-foreground">Fixed-region recorder presets and local starter kits when you need a capture path outside the browser.</div>
                       </div>
                     </div>
-                  </div>
-                  <button
-                    onClick={() => setCapturePreviewVisible((value) => !value)}
-                    className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent"
-                  >
-                    {capturePreviewVisible ? <EyeOff className="mr-2 inline h-4 w-4" /> : <Eye className="mr-2 inline h-4 w-4" />}
-                    {capturePreviewVisible ? "Hide Preview" : "Show Preview"}
-                  </button>
-                </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="flex flex-wrap items-start justify-between gap-3 pt-1">
+                      <p className="max-w-2xl text-sm text-muted-foreground">These starter kits stay local. Use them when you want a fixed pixel recording region that mirrors the stage layout you built here.</p>
+                      <button
+                        onClick={() => setCapturePreviewVisible((value) => !value)}
+                        className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent"
+                      >
+                        {capturePreviewVisible ? <EyeOff className="mr-2 inline h-4 w-4" /> : <Eye className="mr-2 inline h-4 w-4" />}
+                        {capturePreviewVisible ? "Hide Preview" : "Show Preview"}
+                      </button>
+                    </div>
 
-                <div className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-                  <CapturePreview config={captureConfig} visible={capturePreviewVisible} />
-                  <div className="space-y-3">
-                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-muted-foreground">
-                      <p className="font-medium text-foreground">Current export behavior</p>
-                      <p className="mt-1">This kit exports a local-only fixed pixel recorder. Use the sync button if you want the crop starter to match the screen layer you arranged in Parallax.</p>
+                    <div className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+                      <CapturePreview config={captureConfig} visible={capturePreviewVisible} />
+                      <div className="space-y-3">
+                        <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-muted-foreground">
+                          <p className="font-medium text-foreground">Current export behavior</p>
+                          <p className="mt-1">This kit exports a local-only fixed pixel recorder. Use sync if you want the crop starter to match the screen layer you arranged on stage.</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <CaptureNumberField label="Display W" value={captureConfig.displayW} onChange={(value) => setCaptureField("displayW", value)} min={1} />
+                          <CaptureNumberField label="Display H" value={captureConfig.displayH} onChange={(value) => setCaptureField("displayH", value)} min={1} />
+                          <CaptureNumberField label="Crop X" value={captureConfig.x} onChange={(value) => setCaptureField("x", value)} min={0} />
+                          <CaptureNumberField label="Crop Y" value={captureConfig.y} onChange={(value) => setCaptureField("y", value)} min={0} />
+                          <CaptureNumberField label="Crop W" value={captureConfig.w} onChange={(value) => setCaptureField("w", value)} min={1} />
+                          <CaptureNumberField label="Crop H" value={captureConfig.h} onChange={(value) => setCaptureField("h", value)} min={1} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <CaptureNumberField label="Video Index" value={captureConfig.videoIndex} onChange={(value) => setCaptureField("videoIndex", value)} min={0} />
+                          <CaptureNumberField label="Audio Index" value={captureConfig.audioIndex} onChange={(value) => setCaptureField("audioIndex", value)} min={0} />
+                          <CaptureNumberField label="FPS" value={captureConfig.fps} onChange={(value) => setCaptureField("fps", value)} min={1} />
+                          <CaptureTextField label="Pixel Format" value={captureConfig.pixelFormat} onChange={(value) => setCaptureField("pixelFormat", value)} />
+                        </div>
+                        <CaptureTextField label="Audio Device Hint" value={captureConfig.audioDeviceName} onChange={(value) => setCaptureField("audioDeviceName", value)} />
+                        <CaptureTextField label="Output Directory" value={captureConfig.outputDir} onChange={(value) => setCaptureField("outputDir", value)} />
+                        <CaptureTextField label="File Prefix" value={captureConfig.filePrefix} onChange={(value) => setCaptureField("filePrefix", value)} />
+                        <div className="flex flex-wrap gap-3">
+                          <button onClick={syncCaptureToScreenLayer} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Use Screen Layer Bounds</button>
+                          <button onClick={() => downloadCaptureKit("mac")} className="rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"><Download className="mr-2 inline h-4 w-4" />Mac Kit</button>
+                          <button onClick={() => downloadCaptureKit("win")} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent"><Download className="mr-2 inline h-4 w-4" />Windows Kit</button>
+                          <button onClick={copyCaptureSetup} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Copy Setup</button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <CaptureNumberField label="Display W" value={captureConfig.displayW} onChange={(value) => setCaptureField("displayW", value)} min={1} />
-                      <CaptureNumberField label="Display H" value={captureConfig.displayH} onChange={(value) => setCaptureField("displayH", value)} min={1} />
-                      <CaptureNumberField label="Crop X" value={captureConfig.x} onChange={(value) => setCaptureField("x", value)} min={0} />
-                      <CaptureNumberField label="Crop Y" value={captureConfig.y} onChange={(value) => setCaptureField("y", value)} min={0} />
-                      <CaptureNumberField label="Crop W" value={captureConfig.w} onChange={(value) => setCaptureField("w", value)} min={1} />
-                      <CaptureNumberField label="Crop H" value={captureConfig.h} onChange={(value) => setCaptureField("h", value)} min={1} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <CaptureNumberField label="Video Index" value={captureConfig.videoIndex} onChange={(value) => setCaptureField("videoIndex", value)} min={0} />
-                      <CaptureNumberField label="Audio Index" value={captureConfig.audioIndex} onChange={(value) => setCaptureField("audioIndex", value)} min={0} />
-                      <CaptureNumberField label="FPS" value={captureConfig.fps} onChange={(value) => setCaptureField("fps", value)} min={1} />
-                      <CaptureTextField label="Pixel Format" value={captureConfig.pixelFormat} onChange={(value) => setCaptureField("pixelFormat", value)} />
-                    </div>
-                    <CaptureTextField label="Audio Device Hint" value={captureConfig.audioDeviceName} onChange={(value) => setCaptureField("audioDeviceName", value)} />
-                    <CaptureTextField label="Output Directory" value={captureConfig.outputDir} onChange={(value) => setCaptureField("outputDir", value)} />
-                    <CaptureTextField label="File Prefix" value={captureConfig.filePrefix} onChange={(value) => setCaptureField("filePrefix", value)} />
-                    <div className="flex flex-wrap gap-3">
-                      <button onClick={syncCaptureToScreenLayer} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Use Screen Layer Bounds</button>
-                      <button onClick={() => downloadCaptureKit("mac")} className="rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"><Download className="mr-2 inline h-4 w-4" />Mac Kit</button>
-                      <button onClick={() => downloadCaptureKit("win")} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent"><Download className="mr-2 inline h-4 w-4" />Windows Kit</button>
-                      <button onClick={copyCaptureSetup} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Copy Setup</button>
-                    </div>
-                  </div>
-                </div>
-              </section>
+                  </AccordionContent>
+                </AccordionItem>
 
-              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-2xl bg-primary/10 p-3 text-primary"><LayoutPanelTop className="h-5 w-5" /></div>
-                  <div>
-                    <h3 className="text-base font-semibold">Merged Workflow</h3>
-                    <p className="text-sm text-muted-foreground">Parallax remains the hero workspace. The drawer keeps the older tools nearby without splitting the UI into two competing studios.</p>
-                  </div>
-                </div>
-              </section>
+                <AccordionItem value="workflow" className="rounded-[28px] border border-white/10 bg-white/[0.03] px-5">
+                  <AccordionTrigger className="py-5 text-left text-base font-semibold text-foreground hover:no-underline">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-2xl bg-primary/10 p-3 text-primary"><LayoutPanelTop className="h-5 w-5" /></div>
+                      <div>
+                        <div>Workflow Model</div>
+                        <div className="mt-1 text-sm font-normal text-muted-foreground">Why everything is kept inside this one studio surface.</div>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <p className="text-sm text-muted-foreground">This command center keeps recording, overlays, capture setup, and playback in one place so the stage stays the focal point and the workflow stays fast.</p>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
             </div>
           </div>
         </SheetContent>

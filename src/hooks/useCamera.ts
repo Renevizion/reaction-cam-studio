@@ -26,7 +26,7 @@ export function useCamera(): UseCameraReturn {
           facingMode,
           width: { ideal: 1920 },
           height: { ideal: 1080 },
-          frameRate: { ideal: 30 },
+          frameRate: { ideal: 60 },
         },
         // Disable all browser audio processing — these filters degrade quality
         // and interfere with Bluetooth mics. Native camera apps don't use them.
@@ -75,7 +75,7 @@ export function useCamera(): UseCameraReturn {
           facingMode: newFacingMode,
           width: { ideal: 1920 },
           height: { ideal: 1080 },
-          frameRate: { ideal: 30 },
+          frameRate: { ideal: 60 },
         },
         audio: {
           echoCancellation: false,
