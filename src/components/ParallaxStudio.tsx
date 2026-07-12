@@ -83,8 +83,7 @@ const QUICK_START_DISMISSED_KEY = "scriptcam.quick-start.dismissed.v1";
 const AUDIO_MIX_KEY = "scriptcam.audio-mix.v1";
 const CAMERA_DEVICE_KEY = "scriptcam.camera-device.v1";
 const MIC_DEVICE_KEY = "scriptcam.mic-device.v1";
-const RECORDING_CAPTURE_FPS = 24;
-const RECORDING_STABILITY_PRESET: RecordingQualityPreset = "balanced";
+const RECORDING_CAPTURE_FPS = 60;
 
 const RECORDING_QUALITY_BITS_PER_PIXEL: Record<RecordingQualityPreset, number> = {
   balanced: 0.09,
@@ -102,7 +101,7 @@ const estimateVideoBitrate = (
 ) => {
   const pixelsPerSecond = Math.max(1, width) * Math.max(1, height) * Math.max(1, fps);
   const target = Math.round(pixelsPerSecond * RECORDING_QUALITY_BITS_PER_PIXEL[preset]);
-  return clamp(target, 4_000_000, 12_000_000);
+  return clamp(target, 6_000_000, 30_000_000);
 };
 
 const canPlaybackMimeType = (type: string) => {
@@ -1583,7 +1582,7 @@ export default function Compositor() {
         setFrameMs(Math.round(maxFrame));
 
         // Auto-quality scaling
-        if (autoQuality && !recording) {
+        if (autoQuality) {
           const q = qualityRef.current;
           const now2 = performance.now();
           if (currentFps < 24 && q !== "low" && now2 - lastQualityShift > 2500) {
@@ -1689,7 +1688,7 @@ export default function Compositor() {
       hs.y = hs.y + (hp.y - hs.y) * alpha;
 
       // Auto parallax breathing — subtle drift on screen layer
-      const breathe = autoParallaxRef.current && !recording
+      const breathe = autoParallaxRef.current
         ? { dx: Math.sin(tSec * 0.5) * 6, dy: Math.cos(tSec * 0.4) * 4, rot: Math.sin(tSec * 0.3) * 0.4 }
         : { dx: 0, dy: 0, rot: 0 };
       // Face-driven parallax — invert x (webcam is mirrored feel), amplify small movements
@@ -1820,7 +1819,7 @@ export default function Compositor() {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [shadow, rounded, roundedRadius, bgTone, order, autoQuality, recording, screenPaused, webcamPaused, brbActive, brbText, brbSubtext, teleprompter, logo.config, overlays.settings]);
+  }, [shadow, rounded, roundedRadius, bgTone, order, autoQuality, screenPaused, webcamPaused, brbActive, brbText, brbSubtext, teleprompter, logo.config, overlays.settings]);
 
   // recording timer
   useEffect(() => {
@@ -2111,7 +2110,7 @@ http.createServer((req, res) => {
   const startRecording = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const recordingProfile = getRecordingProfile(CANVAS_W, CANVAS_H, RECORDING_CAPTURE_FPS, RECORDING_STABILITY_PRESET);
+    const recordingProfile = getRecordingProfile(CANVAS_W, CANVAS_H, RECORDING_CAPTURE_FPS, recordingQualityPreset);
     const stream = canvas.captureStream(recordingProfile.fps);
     appendMixedAudioTracks(stream);
     const rec = new MediaRecorder(stream, {
@@ -2142,12 +2141,12 @@ http.createServer((req, res) => {
         toast.success("Recording saved to gallery");
       })();
     };
-    rec.start();
+    rec.start(1000);
     recorderRef.current = rec;
     setRecording(true);
     setRecStart(Date.now());
     setRecElapsed(0);
-  }, [addRecording, appendMixedAudioTracks]);
+  }, [addRecording, appendMixedAudioTracks, recordingQualityPreset]);
 
   const stopRecording = useCallback(() => {
     recorderRef.current?.stop();
@@ -2295,8 +2294,8 @@ http.createServer((req, res) => {
     fps >= 50 ? "good" : fps >= 30 ? "warn" : "bad";
   const fpsColor = fpsState === "good" ? "bg-emerald-500" : fpsState === "warn" ? "bg-amber-500" : "bg-red-500";
   const recordingProfile = useMemo(
-    () => getRecordingProfile(CANVAS_W, CANVAS_H, RECORDING_CAPTURE_FPS, RECORDING_STABILITY_PRESET),
-    [],
+    () => getRecordingProfile(CANVAS_W, CANVAS_H, RECORDING_CAPTURE_FPS, recordingQualityPreset),
+    [recordingQualityPreset],
   );
 
   const outOfSafe = useMemo(() => {
