@@ -29,11 +29,15 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
           </button>
           
           <video
+            key={recording.id}
             src={recording.url}
             className="w-full h-full object-contain"
             controls
             autoPlay
             playsInline
+            onError={() => {
+              console.error('Playback failed for recording', recording.id, recording.blob.type);
+            }}
           />
         </motion.div>
       )}

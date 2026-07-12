@@ -103,13 +103,43 @@ const estimateVideoBitrate = (
   return clamp(target, 6_000_000, 30_000_000);
 };
 
+const canPlaybackMimeType = (type: string) => {
+  const probe = document.createElement("video");
+  if (probe.canPlayType(type)) return true;
+  const baseType = type.split(";")[0] ?? type;
+  return !!probe.canPlayType(baseType);
+};
+
 const getPreferredRecorderMimeType = (candidates: string[]) =>
-  candidates.find((type) => MediaRecorder.isTypeSupported(type));
+  candidates.find((type) => MediaRecorder.isTypeSupported(type) && canPlaybackMimeType(type));
+
+const formatUserMediaError = (error: unknown, sourceLabel: string) => {
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError") {
+      return `${sourceLabel} permission is blocked. Allow access in your browser settings.`;
+    }
+    if (error.name === "NotFoundError") {
+      return `${sourceLabel} device not found. Reconnect the device and try again.`;
+    }
+    if (error.name === "NotReadableError") {
+      return `${sourceLabel} is busy in another app or tab. Close other camera apps and retry.`;
+    }
+    if (error.name === "OverconstrainedError") {
+      return `${sourceLabel} could not satisfy current constraints. Try Auto or another device.`;
+    }
+    if (error.name === "AbortError") {
+      return `${sourceLabel} start was interrupted. Try once more.`;
+    }
+  }
+  return error instanceof Error ? error.message : "capture failed";
+};
 
 const getRecordingProfile = (width: number, height: number, fps: number, preset: RecordingQualityPreset) => {
   const videoBitsPerSecond = estimateVideoBitrate(width, height, fps, preset);
   const audioBitsPerSecond = 320_000;
   const mimeType = getPreferredRecorderMimeType([
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4",
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm",
@@ -961,9 +991,9 @@ export default function Compositor() {
       setWebcamReady(true);
       toast.success(`Camera connected: ${track.label || "camera"}`);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "capture failed";
+      const message = formatUserMediaError(e, "Camera");
       setError(`Webcam: ${message}`);
-      toast.error(`Camera failed: ${message}`);
+      toast.error(message);
     }
   }, [refreshMediaDevices, selectedCameraDeviceId, selectedMicDeviceId]);
 
@@ -989,14 +1019,59 @@ export default function Compositor() {
     await startWebcam(nextDeviceId);
   }, [startWebcam, stopWebcam, webcamReady]);
 
+  const applyMicSelectionToActiveWebcam = useCallback(async (nextMicDeviceId: string) => {
+    const activeStream = webcamStreamRef.current;
+    if (!activeStream) return;
+
+    const existingAudioTracks = activeStream.getAudioTracks();
+    if (nextMicDeviceId === "none") {
+      existingAudioTracks.forEach((track) => {
+        activeStream.removeTrack(track);
+        track.stop();
+      });
+      setWebcamMeta((previous) => previous.replace(" · mic live", ""));
+      await rebuildAudioMixer();
+      toast.success("Microphone disabled");
+      return;
+    }
+
+    try {
+      const freshAudioStream = await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: nextMicDeviceId
+          ? { deviceId: { ideal: nextMicDeviceId } }
+          : true,
+      });
+
+      const nextTrack = freshAudioStream.getAudioTracks()[0];
+      if (!nextTrack) {
+        setError("Webcam: Selected microphone did not provide audio.");
+        toast.error("Selected microphone did not provide audio");
+        return;
+      }
+
+      existingAudioTracks.forEach((track) => {
+        activeStream.removeTrack(track);
+        track.stop();
+      });
+      activeStream.addTrack(nextTrack);
+      setWebcamMeta((previous) => (previous.includes(" · mic live") ? previous : `${previous} · mic live`));
+      await rebuildAudioMixer();
+      toast.success(`Mic switched: ${nextTrack.label || "default"}`);
+    } catch (error) {
+      const message = formatUserMediaError(error, "Microphone");
+      setError(`Webcam: ${message}`);
+      toast.error(message);
+    }
+  }, [rebuildAudioMixer]);
+
   const handleMicSourceChange = useCallback(async (event: ChangeEvent<HTMLSelectElement>) => {
     const nextMicDeviceId = event.target.value;
     setSelectedMicDeviceId(nextMicDeviceId);
     if (!webcamReady) return;
 
-    stopWebcam();
-    await startWebcam(selectedCameraDeviceId);
-  }, [selectedCameraDeviceId, startWebcam, stopWebcam, webcamReady]);
+    await applyMicSelectionToActiveWebcam(nextMicDeviceId);
+  }, [applyMicSelectionToActiveWebcam, webcamReady]);
 
   const drawLayer = (
     ctx: CanvasRenderingContext2D,
@@ -1903,6 +1978,10 @@ http.createServer((req, res) => {
     recordedChunksRef.current = [];
     rec.ondataavailable = (e) => e.data.size > 0 && recordedChunksRef.current.push(e.data);
     rec.onstop = () => {
+      if (recordedChunksRef.current.length < 1) {
+        toast.error("Recording finished with no media data. Try a longer take and retry.");
+        return;
+      }
       const blob = new Blob(recordedChunksRef.current, { type: rec.mimeType || recordingProfile.mimeType || "video/webm" });
       const url = URL.createObjectURL(blob);
       const recording: Recording = {
