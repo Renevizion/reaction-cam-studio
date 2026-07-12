@@ -1414,10 +1414,11 @@ export default function Compositor() {
       });
 
       if (modeClipped) {
-        // (a) Full webcam base — you're always visible in your setting
-        drawWebcamRaw();
-        // (b) Screen on top — covers part of the webcam view
-        drawScreen();
+        // Respect user-selected layer order even when behind-head clipping is active.
+        for (const key of order) {
+          if (key === "screen") drawScreen();
+          else drawWebcamRaw();
+        }
         // (c) Person cutout, clipped to screen's transformed rounded rect —
         //     silhouette only pushes through where it overlaps the screen
         if (personReady) {
@@ -1898,8 +1899,8 @@ http.createServer((req, res) => {
   };
 
   // Presets
-  const savePreset = () => {
-    const name = presetName.trim() || `Scene ${presets.length + 1}`;
+  const savePreset = (nameOverride?: string) => {
+    const name = (nameOverride ?? presetName).trim() || `Scene ${presets.length + 1}`;
     const preset: Preset = {
       id: `p_${Date.now()}`,
       name,
@@ -1914,10 +1915,7 @@ http.createServer((req, res) => {
     toast.success(`Saved preset: ${name}`);
   };
   const quickSavePreset = () => {
-    if (!presetName.trim()) {
-      setPresetName(`Scene ${presets.length + 1}`);
-    }
-    savePreset();
+    savePreset(presetName.trim() || `Scene ${presets.length + 1}`);
   };
   const loadPreset = (p: Preset) => {
     commitTransform("screen", p.screen);
@@ -2909,7 +2907,7 @@ http.createServer((req, res) => {
               onClick={() => setShowDockPresets((value) => !value)}
               className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${showDockPresets ? "border-primary bg-primary text-primary-foreground" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
             >
-              Saved Presets
+              Saved Presets ({Math.min(8, presets.length)}{presets.length > 8 ? `/${presets.length}` : ""})
             </button>
             <span className="ml-auto rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[10px] text-white/80">{screenReady ? "screen ready" : "screen idle"} · {webcamReady ? "cam ready" : "cam idle"}</span>
           </div>
@@ -2925,6 +2923,9 @@ http.createServer((req, res) => {
                 </button>
               ))}
               {presets.length === 0 && <span className="text-[11px] text-white/70">No presets saved yet.</span>}
+              {presets.length > 8 && (
+                <span className="text-[11px] text-white/70">Showing newest 8 of {presets.length}.</span>
+              )}
               <button onClick={() => setShowGallery(true)} className="rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/[0.10]">Open Library</button>
             </div>
           )}
