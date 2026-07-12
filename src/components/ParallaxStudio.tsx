@@ -82,6 +82,7 @@ const KICK_RTMPS_URL = "rtmps://fa723fc1b171.global-contribute.live-video.net/ap
 const QUICK_START_DISMISSED_KEY = "scriptcam.quick-start.dismissed.v1";
 const AUDIO_MIX_KEY = "scriptcam.audio-mix.v1";
 const CAMERA_DEVICE_KEY = "scriptcam.camera-device.v1";
+const MIC_DEVICE_KEY = "scriptcam.mic-device.v1";
 
 const RECORDING_QUALITY_BITS_PER_PIXEL: Record<RecordingQualityPreset, number> = {
   balanced: 0.09,
@@ -220,7 +221,9 @@ export default function Compositor() {
   const [screenMeta, setScreenMeta] = useState<string>("");
   const [webcamMeta, setWebcamMeta] = useState<string>("");
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraDeviceId, setSelectedCameraDeviceId] = useState(() => localStorage.getItem(CAMERA_DEVICE_KEY) || "");
+  const [selectedMicDeviceId, setSelectedMicDeviceId] = useState(() => localStorage.getItem(MIC_DEVICE_KEY) || "");
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recStart, setRecStart] = useState<number | null>(null);
@@ -435,6 +438,9 @@ export default function Compositor() {
   useEffect(() => {
     localStorage.setItem(CAMERA_DEVICE_KEY, selectedCameraDeviceId);
   }, [selectedCameraDeviceId]);
+  useEffect(() => {
+    localStorage.setItem(MIC_DEVICE_KEY, selectedMicDeviceId);
+  }, [selectedMicDeviceId]);
 
   const qualityRef = useRef<QualityTier>("high");
   qualityRef.current = quality;
@@ -487,31 +493,38 @@ export default function Compositor() {
     }
   }, []);
 
-  const refreshVideoDevices = useCallback(async () => {
+  const refreshMediaDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       setVideoDevices(devices.filter((device) => device.kind === "videoinput"));
+      setAudioInputDevices(devices.filter((device) => device.kind === "audioinput"));
     } catch {
       // Ignore device enumeration errors until permission is granted.
     }
   }, []);
 
   useEffect(() => {
-    void refreshVideoDevices();
+    void refreshMediaDevices();
     const mediaDevices = navigator.mediaDevices;
     if (!mediaDevices?.addEventListener) return;
 
-    const onDeviceChange = () => { void refreshVideoDevices(); };
+    const onDeviceChange = () => { void refreshMediaDevices(); };
     mediaDevices.addEventListener("devicechange", onDeviceChange);
     return () => mediaDevices.removeEventListener("devicechange", onDeviceChange);
-  }, [refreshVideoDevices]);
+  }, [refreshMediaDevices]);
 
   useEffect(() => {
     if (!selectedCameraDeviceId) return;
     if (videoDevices.some((device) => device.deviceId === selectedCameraDeviceId)) return;
     setSelectedCameraDeviceId("");
   }, [selectedCameraDeviceId, videoDevices]);
+
+  useEffect(() => {
+    if (!selectedMicDeviceId || selectedMicDeviceId === "none") return;
+    if (audioInputDevices.some((device) => device.deviceId === selectedMicDeviceId)) return;
+    setSelectedMicDeviceId("");
+  }, [audioInputDevices, selectedMicDeviceId]);
 
   const ensureAudioMixer = useCallback(() => {
     if (audioContextRef.current && audioDestinationRef.current) {
@@ -894,14 +907,26 @@ export default function Compositor() {
         ? { ...baseVideo, deviceId: { exact: targetDeviceId } }
         : baseVideo;
 
+      const requestedAudio: MediaTrackConstraints | boolean = selectedMicDeviceId === "none"
+        ? false
+        : selectedMicDeviceId
+          ? {
+              deviceId: { exact: selectedMicDeviceId },
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              sampleRate: { ideal: 48000 },
+            }
+          : {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              sampleRate: { ideal: 48000 },
+            };
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: requestedVideo,
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          sampleRate: { ideal: 48000 },
-        },
+        audio: requestedAudio,
       });
       webcamStreamRef.current = stream;
       const v = webcamVideoRef.current!;
@@ -912,12 +937,13 @@ export default function Compositor() {
       const hasMic = stream.getAudioTracks().length > 0;
       setWebcamMeta(`${track.label || "camera"} · ${s.width ?? "?"}×${s.height ?? "?"}${hasMic ? " · mic live" : ""}`);
       if (s.deviceId) setSelectedCameraDeviceId(s.deviceId);
-      void refreshVideoDevices();
+      void refreshMediaDevices();
       track.addEventListener("ended", () => {
         setWebcamReady(false);
         setWebcamMeta("");
       });
       setWebcamReady(true);
+      toast.success(`Camera connected: ${track.label || "camera"}`);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "capture failed";
       const isDeviceConstraintError = e instanceof DOMException && e.name === "OverconstrainedError";
@@ -931,12 +957,7 @@ export default function Compositor() {
               height: { ideal: 1080 },
               frameRate: { ideal: 60 },
             },
-            audio: {
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-              sampleRate: { ideal: 48000 },
-            },
+            audio: requestedAudio,
           });
           webcamStreamRef.current = fallbackStream;
           const fallbackVideo = webcamVideoRef.current!;
@@ -952,15 +973,17 @@ export default function Compositor() {
             setWebcamMeta("");
           });
           setWebcamReady(true);
-          void refreshVideoDevices();
+          void refreshMediaDevices();
+          toast.success(`Camera connected: ${fallbackTrack.label || "camera"}`);
           return;
         } catch {
           // Fall through to generic error reporting.
         }
       }
       setError(`Webcam: ${message}`);
+      toast.error(`Camera failed: ${message}`);
     }
-  }, [refreshVideoDevices, selectedCameraDeviceId]);
+  }, [refreshMediaDevices, selectedCameraDeviceId, selectedMicDeviceId]);
 
   const stopScreen = useCallback(() => {
     screenStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -983,6 +1006,15 @@ export default function Compositor() {
     stopWebcam();
     await startWebcam(nextDeviceId);
   }, [startWebcam, stopWebcam, webcamReady]);
+
+  const handleMicSourceChange = useCallback(async (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextMicDeviceId = event.target.value;
+    setSelectedMicDeviceId(nextMicDeviceId);
+    if (!webcamReady) return;
+
+    stopWebcam();
+    await startWebcam(selectedCameraDeviceId);
+  }, [selectedCameraDeviceId, startWebcam, stopWebcam, webcamReady]);
 
   const drawLayer = (
     ctx: CanvasRenderingContext2D,
@@ -2939,7 +2971,7 @@ http.createServer((req, res) => {
               onClick={webcamReady ? stopWebcam : startWebcam}
               className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${webcamReady ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
             >
-              {webcamReady ? "Cam On" : "Start Cam"}
+              {webcamReady ? "Stop Cam" : "Start Cam"}
             </button>
             <label className="flex items-center gap-2 rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[11px] text-white/85">
               <span>Camera</span>
@@ -2953,6 +2985,23 @@ http.createServer((req, res) => {
                 {videoDevices.map((device, index) => (
                   <option key={device.deviceId || `${device.kind}-${index}`} value={device.deviceId} className="bg-[#0b1020] text-white">
                     {device.label || `Camera ${index + 1}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[11px] text-white/85">
+              <span>Mic</span>
+              <select
+                value={selectedMicDeviceId}
+                onChange={handleMicSourceChange}
+                className="rounded bg-transparent text-[11px] text-white outline-none"
+                title="Choose microphone source for camera capture"
+              >
+                <option value="" className="bg-[#0b1020] text-white">Auto</option>
+                <option value="none" className="bg-[#0b1020] text-white">None</option>
+                {audioInputDevices.map((device, index) => (
+                  <option key={device.deviceId || `${device.kind}-${index}`} value={device.deviceId} className="bg-[#0b1020] text-white">
+                    {device.label || `Mic ${index + 1}`}
                   </option>
                 ))}
               </select>
@@ -3021,6 +3070,8 @@ http.createServer((req, res) => {
             </button>
             <span className="ml-auto rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[10px] text-white/80">{screenReady ? "screen ready" : "screen idle"} · {webcamReady ? "cam ready" : "cam idle"}</span>
           </div>
+          {webcamMeta && <p className="mt-2 text-[11px] text-white/75">{webcamMeta}</p>}
+          {error && <p className="mt-2 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-200">{error}</p>}
           {showDockPresets && (
             <div className="mt-2 flex flex-wrap gap-2 border-t border-white/10 pt-2">
               {presets.slice(0, 8).map((preset) => (
