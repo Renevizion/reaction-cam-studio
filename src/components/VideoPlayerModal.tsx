@@ -14,7 +14,6 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   const [videoReady, setVideoReady] = useState(false);
   const [pausedFrame, setPausedFrame] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const lastFrameRef = useRef<string | null>(null);
 
   const captureVideoFrame = () => {
     const video = videoRef.current;
@@ -35,7 +34,6 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   useEffect(() => {
     setVideoReady(false);
     setPausedFrame(null);
-    lastFrameRef.current = null;
   }, [recording?.id]);
 
   if (!recording) return null;
@@ -66,7 +64,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         key={recording.id}
         src={recording.url}
         poster={recording.thumbnail}
-        className={`w-full h-full object-contain bg-black ${videoReady ? 'opacity-100' : 'opacity-0'}`}
+        className="w-full h-full object-contain bg-black"
         controls
         autoPlay
         playsInline
@@ -74,11 +72,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         onLoadedData={() => setVideoReady(true)}
         onPlay={() => setPausedFrame(null)}
         onPause={() => {
-          if (lastFrameRef.current) setPausedFrame(lastFrameRef.current);
-        }}
-        onTimeUpdate={() => {
           const captured = captureVideoFrame();
-          if (captured) lastFrameRef.current = captured;
+          if (captured) setPausedFrame(captured);
         }}
         onError={() => {
           console.error('Playback failed for recording', recording.id, recording.blob.type);
