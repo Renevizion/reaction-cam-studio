@@ -940,6 +940,10 @@ export default function Compositor() {
         ? { ...baseVideo, deviceId: { exact: targetDeviceId } }
         : baseVideo;
 
+      const preferredVideoSoft: MediaTrackConstraints = targetDeviceId
+        ? { ...baseVideo, deviceId: { ideal: targetDeviceId } }
+        : baseVideo;
+
       const requestedAudio: MediaTrackConstraints | boolean = selectedMicDeviceId === "none"
         ? false
         : selectedMicDeviceId
@@ -964,6 +968,16 @@ export default function Compositor() {
       webcamAttempts.push({ reason: "relaxed camera constraints", constraints: { video: relaxedVideo, audio: requestedAudio } });
       webcamAttempts.push({ reason: "camera only", constraints: { video: preferredVideo, audio: false } });
       webcamAttempts.push({ reason: "camera only relaxed", constraints: { video: cameraOnlyVideo, audio: false } });
+
+      if (targetDeviceId) {
+        webcamAttempts.push({ reason: "preferred camera soft", constraints: { video: preferredVideoSoft, audio: requestedAudio } });
+        if (requestedAudio !== false) {
+          webcamAttempts.push({ reason: "preferred camera soft + auto mic", constraints: { video: preferredVideoSoft, audio: true } });
+        }
+        webcamAttempts.push({ reason: "preferred camera soft only", constraints: { video: preferredVideoSoft, audio: false } });
+        webcamAttempts.push({ reason: "default camera fallback", constraints: { video: baseVideo, audio: requestedAudio } });
+        webcamAttempts.push({ reason: "any camera fallback", constraints: { video: true, audio: false } });
+      }
 
       if (!targetDeviceId) {
         if (requestedAudio !== false) {
