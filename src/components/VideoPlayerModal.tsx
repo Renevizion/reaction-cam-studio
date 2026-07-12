@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { Recording } from '@/hooks/useRecorder';
 
@@ -12,9 +12,30 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   onClose,
 }) => {
   const [videoReady, setVideoReady] = useState(false);
+  const [pausedFrame, setPausedFrame] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const lastFrameRef = useRef<string | null>(null);
+
+  const captureVideoFrame = () => {
+    const video = videoRef.current;
+    if (!video || video.videoWidth < 2 || video.videoHeight < 2) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    try {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.82);
+    } catch {
+      return null;
+    }
+  };
 
   useEffect(() => {
     setVideoReady(false);
+    setPausedFrame(null);
+    lastFrameRef.current = null;
   }, [recording?.id]);
 
   if (!recording) return null;
@@ -34,7 +55,14 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
           style={recording.thumbnail ? { backgroundImage: `url(${recording.thumbnail})` } : undefined}
         />
       )}
+      {pausedFrame && (
+        <div
+          className="absolute inset-0 bg-black bg-center bg-contain bg-no-repeat"
+          style={{ backgroundImage: `url(${pausedFrame})` }}
+        />
+      )}
       <video
+        ref={videoRef}
         key={recording.id}
         src={recording.url}
         poster={recording.thumbnail}
@@ -44,6 +72,14 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         playsInline
         preload="auto"
         onLoadedData={() => setVideoReady(true)}
+        onPlay={() => setPausedFrame(null)}
+        onPause={() => {
+          if (lastFrameRef.current) setPausedFrame(lastFrameRef.current);
+        }}
+        onTimeUpdate={() => {
+          const captured = captureVideoFrame();
+          if (captured) lastFrameRef.current = captured;
+        }}
         onError={() => {
           console.error('Playback failed for recording', recording.id, recording.blob.type);
         }}

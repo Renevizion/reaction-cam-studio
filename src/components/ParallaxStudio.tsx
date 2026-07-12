@@ -114,6 +114,66 @@ const canPlaybackMimeType = (type: string) => {
 const getPreferredRecorderMimeType = (candidates: string[]) =>
   candidates.find((type) => MediaRecorder.isTypeSupported(type) && canPlaybackMimeType(type));
 
+const createThumbnailFromBlob = async (blob: Blob): Promise<string | undefined> => {
+  if (typeof document === "undefined") return undefined;
+
+  const url = URL.createObjectURL(blob);
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.muted = true;
+  video.playsInline = true;
+  video.src = url;
+
+  const waitForEvent = <K extends keyof HTMLMediaElementEventMap>(
+    target: HTMLMediaElement,
+    event: K,
+    timeoutMs: number,
+  ) => new Promise<void>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${String(event)}`));
+    }, timeoutMs);
+
+    const onSuccess = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("thumbnail decode failed"));
+    };
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      target.removeEventListener(event, onSuccess);
+      target.removeEventListener("error", onError);
+    };
+
+    target.addEventListener(event, onSuccess, { once: true });
+    target.addEventListener("error", onError, { once: true });
+  });
+
+  try {
+    await waitForEvent(video, "loadeddata", 4000);
+    if (Number.isFinite(video.duration) && video.duration > 0.2) {
+      video.currentTime = Math.min(0.2, Math.max(0.05, video.duration / 10));
+      await waitForEvent(video, "seeked", 3000);
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return undefined;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.82);
+  } catch {
+    return undefined;
+  } finally {
+    video.src = "";
+    URL.revokeObjectURL(url);
+  }
+};
+
 const formatUserMediaError = (error: unknown, sourceLabel: string) => {
   if (error instanceof DOMException) {
     if (error.name === "NotAllowedError") {
@@ -1123,6 +1183,7 @@ export default function Compositor() {
       rounded?: boolean; radius?: number; shadow?: boolean;
       shadowStrength?: number; shadowBlur?: number;
       glowColor?: string; parallaxDx?: number; parallaxDy?: number; parallaxRot?: number;
+      fallbackSource?: CanvasImageSource | null;
       ready?: boolean;
     },
   ) => {
@@ -1161,9 +1222,24 @@ export default function Compositor() {
       ctx.closePath();
       ctx.clip();
     }
+    let drew = false;
     if (source && opts.ready !== false) {
-      try { ctx.drawImage(source, -w / 2, -h / 2, w, h); } catch {}
-    } else {
+      try {
+        ctx.drawImage(source, -w / 2, -h / 2, w, h);
+        drew = true;
+      } catch {
+        // Continue into fallback source if available.
+      }
+    }
+    if (!drew && opts.fallbackSource) {
+      try {
+        ctx.drawImage(opts.fallbackSource, -w / 2, -h / 2, w, h);
+        drew = true;
+      } catch {
+        // Continue into no-signal placeholder.
+      }
+    }
+    if (!drew) {
       ctx.fillStyle = "#111";
       ctx.fillRect(-w / 2, -h / 2, w, h);
       ctx.fillStyle = "rgba(255,255,255,0.4)";
@@ -1654,6 +1730,7 @@ export default function Compositor() {
         rounded: false, radius: 0,
         shadow: false, shadowStrength: 0.6, shadowBlur: qs.shadowBlur,
         parallaxDx: parallax.dx, parallaxDy: parallax.dy, parallaxRot: parallax.rot,
+        fallbackSource: lastScreenFrameRef.current,
         ready: effectiveScreenReady,
       });
       const drawWebcamRaw = () => {
@@ -1667,6 +1744,7 @@ export default function Compositor() {
         drawLayer(ctx, effectiveWebcamSrc, webcamT.current, {
           rounded, radius: roundedRadius,
           shadow, shadowStrength: 0.75, shadowBlur: qs.shadowBlur,
+          fallbackSource: lastWebcamFrameRef.current,
           ready: effectiveWebcamReady,
         });
       };
@@ -2043,28 +2121,25 @@ http.createServer((req, res) => {
     recordedChunksRef.current = [];
     rec.ondataavailable = (e) => e.data.size > 0 && recordedChunksRef.current.push(e.data);
     rec.onstop = () => {
-      if (recordedChunksRef.current.length < 1) {
-        toast.error("Recording finished with no media data. Try a longer take and retry.");
-        return;
-      }
-      const blob = new Blob(recordedChunksRef.current, { type: rec.mimeType || recordingProfile.mimeType || "video/webm" });
-      const url = URL.createObjectURL(blob);
-      let thumbnail: string | undefined;
-      try {
-        thumbnail = canvas.toDataURL("image/jpeg", 0.82);
-      } catch {
-        thumbnail = undefined;
-      }
-      const recording: Recording = {
-        id: `parallax-${Date.now()}`,
-        blob,
-        url,
-        duration: Math.floor(recElapsedRef.current / 1000),
-        createdAt: new Date(),
-        thumbnail,
-      };
-      addRecording(recording);
-      toast.success("Recording saved to gallery");
+      void (async () => {
+        if (recordedChunksRef.current.length < 1) {
+          toast.error("Recording finished with no media data. Try a longer take and retry.");
+          return;
+        }
+        const blob = new Blob(recordedChunksRef.current, { type: rec.mimeType || recordingProfile.mimeType || "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const thumbnail = await createThumbnailFromBlob(blob);
+        const recording: Recording = {
+          id: `parallax-${Date.now()}`,
+          blob,
+          url,
+          duration: Math.floor(recElapsedRef.current / 1000),
+          createdAt: new Date(),
+          thumbnail,
+        };
+        addRecording(recording);
+        toast.success("Recording saved to gallery");
+      })();
     };
     rec.start(1000);
     recorderRef.current = rec;
