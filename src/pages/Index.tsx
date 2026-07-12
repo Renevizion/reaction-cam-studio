@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FolderOpen, Sparkles, Ratio, Volume2, ImageIcon, FileText } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { CameraOverlay } from '@/components/CameraOverlay';
 import { TeleprompterOverlay } from '@/components/TeleprompterOverlay';
 import { TeleprompterEditor } from '@/components/TeleprompterEditor';
@@ -27,6 +28,7 @@ import { useTeleprompter } from '@/hooks/useTeleprompter';
 import { toast } from 'sonner';
 
 const Index = () => {
+  const navigate = useNavigate();
   const [showGallery, setShowGallery] = useState(false);
   const [showOverlayEditor, setShowOverlayEditor] = useState(false);
   const [showAspectRatio, setShowAspectRatio] = useState(false);
@@ -104,6 +106,14 @@ const Index = () => {
         <div className="flex-1" />
         
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => navigate('/')}
+            className="px-3 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium"
+            title="Open Parallax Studio"
+          >
+            Parallax
+          </button>
+
           {/* Aspect ratio button */}
           <button
             onClick={() => setShowAspectRatio(true)}

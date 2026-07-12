@@ -1,0 +1,2109 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ImageSegmenter, FilesetResolver, type MPMask } from "@mediapipe/tasks-vision";
+import { FileText, ImageIcon, LayoutPanelTop, PanelsTopLeft } from "lucide-react";
+import { TeleprompterEditor } from "@/components/TeleprompterEditor";
+import { LogoUploader } from "@/components/LogoUploader";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useLogo } from "@/hooks/useLogo";
+import { useTeleprompter } from "@/hooks/useTeleprompter";
+import { useNavigate } from "react-router-dom";
+
+type Transform = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number;
+  tiltX: number;
+  tiltY: number;
+  opacity: number;
+  scale: number;
+};
+
+type LayerKey = "screen" | "webcam";
+
+type DragState =
+  | { type: "move"; layer: LayerKey; startX: number; startY: number; origX: number; origY: number }
+  | {
+      type: "resize";
+      layer: LayerKey;
+      corner: "nw" | "ne" | "sw" | "se";
+      startX: number;
+      startY: number;
+      orig: Transform;
+    }
+  | {
+      type: "rotate";
+      layer: LayerKey;
+      cx: number;
+      cy: number;
+      startAngle: number;
+      origRot: number;
+    }
+  | null;
+
+type Preset = {
+  id: string;
+  name: string;
+  screen: Transform;
+  webcam: Transform;
+  order: LayerKey[];
+  bgTone: BgTone;
+  shadow: boolean;
+  rounded: boolean;
+  roundedRadius: number;
+  createdAt: number;
+};
+
+type BgTone = "black" | "studio" | "grid" | "aurora";
+type QualityTier = "high" | "medium" | "low";
+
+const CANVAS_W = 1920;
+const CANVAS_H = 1080;
+const SAFE_MARGIN = 60;
+const GRID_SIZE = 40;
+const PRESETS_KEY = "parallax-studio.presets.v1";
+const TEMPLATES_SEEDED_KEY = "parallax-studio.templates.seeded.v1";
+
+const defaultScreen: Transform = {
+  x: 120, y: 90, w: 1500, h: 844,
+  rotation: -7, tiltX: 10, tiltY: -14, opacity: 0.92, scale: 1,
+};
+const defaultWebcam: Transform = {
+  x: 1050, y: 380, w: 780, h: 600,
+  rotation: 2, tiltX: 0, tiltY: 0, opacity: 1, scale: 1,
+};
+
+const QUALITY_SETTINGS: Record<QualityTier, { shadowBlur: number; scale: number; targetFps: number }> = {
+  high: { shadowBlur: 80, scale: 1, targetFps: 60 },
+  medium: { shadowBlur: 36, scale: 0.85, targetFps: 45 },
+  low: { shadowBlur: 12, scale: 0.66, targetFps: 30 },
+};
+
+const BUILTIN_TEMPLATES: Omit<Preset, "id" | "createdAt">[] = [
+  {
+    name: "★ Cinematic Parallax",
+    screen: { x: 90, y: 60, w: 1550, h: 872, rotation: -8, tiltX: 12, tiltY: -16, opacity: 0.9, scale: 1 },
+    webcam: { x: 1080, y: 380, w: 760, h: 600, rotation: 3, tiltX: 2, tiltY: -2, opacity: 1, scale: 1 },
+    order: ["screen", "webcam"], bgTone: "aurora", shadow: true, rounded: true, roundedRadius: 40,
+  },
+  {
+    name: "★ Tech Podcast", 
+    screen: { x: 60, y: 100, w: 1200, h: 675, rotation: -4, tiltX: 6, tiltY: -8, opacity: 0.85, scale: 1 },
+    webcam: { x: 1200, y: 220, w: 660, h: 740, rotation: 0, tiltX: 0, tiltY: 0, opacity: 1, scale: 1 },
+    order: ["screen", "webcam"], bgTone: "studio", shadow: true, rounded: true, roundedRadius: 32,
+  },
+  {
+    name: "★ Behind-the-Shoulder",
+    screen: { x: 320, y: 40, w: 1500, h: 844, rotation: -10, tiltX: 14, tiltY: -18, opacity: 0.82, scale: 1 },
+    webcam: { x: 40, y: 240, w: 700, h: 800, rotation: -2, tiltX: 0, tiltY: 4, opacity: 1, scale: 1 },
+    order: ["screen", "webcam"], bgTone: "aurora", shadow: true, rounded: true, roundedRadius: 48,
+  },
+  {
+    name: "★ Presenter Focus",
+    screen: { x: 900, y: 100, w: 950, h: 534, rotation: 4, tiltX: -6, tiltY: 8, opacity: 0.9, scale: 1 },
+    webcam: { x: 60, y: 60, w: 820, h: 960, rotation: 0, tiltX: 0, tiltY: 0, opacity: 1, scale: 1 },
+    order: ["screen", "webcam"], bgTone: "studio", shadow: true, rounded: true, roundedRadius: 28,
+  },
+];
+
+export default function Compositor() {
+  const navigate = useNavigate();
+  const teleprompter = useTeleprompter();
+  const logo = useLogo();
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+  const webcamVideoRef = useRef<HTMLVideoElement | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const webcamStreamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+
+  const screenT = useRef<Transform>(defaultScreen);
+  const webcamT = useRef<Transform>(defaultWebcam);
+  const [screenState, setScreenState] = useState<Transform>(screenT.current);
+  const [webcamState, setWebcamState] = useState<Transform>(webcamT.current);
+
+  const [screenReady, setScreenReady] = useState(false);
+  const [webcamReady, setWebcamReady] = useState(false);
+  const [screenMeta, setScreenMeta] = useState<string>("");
+  const [webcamMeta, setWebcamMeta] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recStart, setRecStart] = useState<number | null>(null);
+  const [recElapsed, setRecElapsed] = useState(0);
+  const [shadow, setShadow] = useState(true);
+  const [rounded, setRounded] = useState(true);
+  const [roundedRadius, setRoundedRadius] = useState(28);
+  const [selected, setSelected] = useState<LayerKey>("screen");
+  const [fps, setFps] = useState(0);
+  const [frameMs, setFrameMs] = useState(0);
+  const [bgTone, setBgTone] = useState<BgTone>("studio");
+  const [order, setOrder] = useState<LayerKey[]>(["screen", "webcam"]);
+  const [snapGrid, setSnapGrid] = useState(false);
+  const [showGuides, setShowGuides] = useState(true);
+  const [quality, setQuality] = useState<QualityTier>("high");
+  const [autoQuality, setAutoQuality] = useState(true);
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [presetName, setPresetName] = useState("");
+  const [perfWarn, setPerfWarn] = useState<string | null>(null);
+
+  // Pause / BRB
+  const [screenPaused, setScreenPaused] = useState(false);
+  const [webcamPaused, setWebcamPaused] = useState(false);
+  const screenFrozenRef = useRef<HTMLCanvasElement | null>(null);
+  const webcamFrozenRef = useRef<HTMLCanvasElement | null>(null);
+  const [brbActive, setBrbActive] = useState(false);
+  const [brbText, setBrbText] = useState("BE RIGHT BACK");
+  const [brbSubtext, setBrbSubtext] = useState("Grabbing coffee — back in a moment");
+
+  // Cinematic
+  const [cinematic, setCinematic] = useState(true);
+  const [autoParallax, setAutoParallax] = useState(true);
+  const autoParallaxRef = useRef(true);
+  autoParallaxRef.current = autoParallax;
+  const cinematicRef = useRef(true);
+  cinematicRef.current = cinematic;
+
+  // Segmentation (person cutout via MediaPipe Selfie Segmenter)
+  const [segmentEnabled, setSegmentEnabled] = useState(false);
+  const [segmentReady, setSegmentReady] = useState(false);
+  const [segmentLoading, setSegmentLoading] = useState(false);
+  const [segmentInvert, setSegmentInvert] = useState(false);
+  const [segmentError, setSegmentError] = useState<string | null>(null);
+  const [featherPx, setFeatherPx] = useState(2);
+  const [faceParallax, setFaceParallax] = useState(true);
+  const [parallaxStrength, setParallaxStrength] = useState(60);
+  // "screen-clipped" = full webcam always visible; cutout applied ONLY where screen overlaps
+  // "full-cutout"    = classic silhouette on top of screen; background disappears when inverted
+  const [segmentMode, setSegmentMode] = useState<"screen-clipped" | "full-cutout">("screen-clipped");
+  const segmenterRef = useRef<ImageSegmenter | null>(null);
+  const personCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lastSegAtRef = useRef(0);
+  const segBusyRef = useRef(false);
+  const headPosRef = useRef({ x: 0.5, y: 0.5 });
+  const headSmoothRef = useRef({ x: 0.5, y: 0.5 });
+  const segmentEnabledRef = useRef(false);
+  segmentEnabledRef.current = segmentEnabled;
+  const segmentInvertRef = useRef(false);
+  segmentInvertRef.current = segmentInvert;
+  const featherRef = useRef(2);
+  featherRef.current = featherPx;
+  const faceParallaxRef = useRef(true);
+  faceParallaxRef.current = faceParallax;
+  const parallaxStrengthRef = useRef(60);
+  parallaxStrengthRef.current = parallaxStrength;
+  const segmentModeRef = useRef<"screen-clipped" | "full-cutout">("screen-clipped");
+  segmentModeRef.current = segmentMode;
+
+  // Layer locks + alt-to-click-through
+  const [screenLocked, setScreenLocked] = useState(false);
+  const [webcamLocked, setWebcamLocked] = useState(false);
+  const [altHeld, setAltHeld] = useState(false);
+
+  // Custom background image
+  const [customBgUrl, setCustomBgUrl] = useState<string | null>(null);
+  const customBgImgRef = useRef<HTMLImageElement | null>(null);
+  useEffect(() => {
+    if (!customBgUrl) { customBgImgRef.current = null; return; }
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => { customBgImgRef.current = img; };
+    img.src = customBgUrl;
+  }, [customBgUrl]);
+
+  // Streaming (local FFmpeg bridge)
+  const [streamUrl, setStreamUrl] = useState(() => localStorage.getItem("parallax.streamUrl") || "");
+  const [streamKey, setStreamKey] = useState(() => localStorage.getItem("parallax.streamKey") || "");
+  const [streamBitrate, setStreamBitrate] = useState(6000);
+  const [streamFps, setStreamFps] = useState(60);
+  const [streamKeyframe, setStreamKeyframe] = useState(2);
+  const [bridgePort, setBridgePort] = useState(9999);
+  const [streaming, setStreaming] = useState(false);
+  const [streamStatus, setStreamStatus] = useState<string>("");
+  const streamRecRef = useRef<MediaRecorder | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const logoImageRef = useRef<HTMLImageElement | null>(null);
+  const teleprompterOffsetRef = useRef(0);
+  const [showCreatorTools, setShowCreatorTools] = useState(false);
+  const [showTeleprompterEditor, setShowTeleprompterEditor] = useState(false);
+  const [showLogoUploader, setShowLogoUploader] = useState(false);
+  useEffect(() => { localStorage.setItem("parallax.streamUrl", streamUrl); }, [streamUrl]);
+  useEffect(() => { localStorage.setItem("parallax.streamKey", streamKey); }, [streamKey]);
+
+  useEffect(() => {
+    teleprompterOffsetRef.current = 0;
+  }, [teleprompter.state.script, teleprompter.state.fontSize]);
+
+  useEffect(() => {
+    if (!logo.config.url) {
+      logoImageRef.current = null;
+      return;
+    }
+    const image = new Image();
+    image.onload = () => { logoImageRef.current = image; };
+    image.src = logo.config.url;
+  }, [logo.config.url]);
+
+  const qualityRef = useRef<QualityTier>("high");
+  qualityRef.current = quality;
+  const snapRef = useRef(false);
+  snapRef.current = snapGrid;
+  const teleprompterStateRef = useRef(teleprompter.state);
+  teleprompterStateRef.current = teleprompter.state;
+
+  // load presets + seed built-in templates once
+  useEffect(() => {
+    let list: Preset[] = [];
+    try {
+      const raw = localStorage.getItem(PRESETS_KEY);
+      if (raw) list = JSON.parse(raw);
+    } catch {}
+    const seeded = localStorage.getItem(TEMPLATES_SEEDED_KEY);
+    if (!seeded) {
+      const tpl: Preset[] = BUILTIN_TEMPLATES.map((p, i) => ({
+        ...p, id: `tpl_${i}`, createdAt: Date.now() - i,
+      }));
+      list = [...tpl, ...list];
+      try {
+        localStorage.setItem(TEMPLATES_SEEDED_KEY, "1");
+        localStorage.setItem(PRESETS_KEY, JSON.stringify(list));
+      } catch {}
+    }
+    setPresets(list);
+  }, []);
+  const persistPresets = (list: Preset[]) => {
+    setPresets(list);
+    try {
+      localStorage.setItem(PRESETS_KEY, JSON.stringify(list));
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (!screenVideoRef.current) {
+      const v = document.createElement("video");
+      v.muted = true;
+      v.autoplay = true;
+      v.playsInline = true;
+      screenVideoRef.current = v;
+    }
+    if (!webcamVideoRef.current) {
+      const v = document.createElement("video");
+      v.muted = true;
+      v.autoplay = true;
+      v.playsInline = true;
+      webcamVideoRef.current = v;
+    }
+  }, []);
+
+  // Init offscreen canvases for segmentation
+  useEffect(() => {
+    if (!personCanvasRef.current) personCanvasRef.current = document.createElement("canvas");
+    if (!maskCanvasRef.current) maskCanvasRef.current = document.createElement("canvas");
+  }, []);
+
+  // Load / release MediaPipe Selfie Segmenter when toggled
+  useEffect(() => {
+    let cancelled = false;
+    if (!segmentEnabled) {
+      if (segmenterRef.current) { try { segmenterRef.current.close(); } catch {} segmenterRef.current = null; }
+      setSegmentReady(false);
+      return;
+    }
+    (async () => {
+      try {
+        setSegmentLoading(true);
+        setSegmentError(null);
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm",
+        );
+        if (cancelled) return;
+        const seg = await ImageSegmenter.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          outputCategoryMask: true,
+          outputConfidenceMasks: false,
+        });
+        if (cancelled) { try { seg.close(); } catch {} return; }
+        segmenterRef.current = seg;
+        setSegmentReady(true);
+      } catch (e) {
+        setSegmentError(e instanceof Error ? e.message : "segmenter init failed");
+        setSegmentReady(false);
+      } finally {
+        if (!cancelled) setSegmentLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (segmenterRef.current) { try { segmenterRef.current.close(); } catch {} segmenterRef.current = null; }
+      setSegmentReady(false);
+    };
+  }, [segmentEnabled]);
+
+  // Run segmentation on the webcam frame → produce personCanvas (video with alpha cutout) + head centroid
+  const runSegmentation = (video: HTMLVideoElement) => {
+    const seg = segmenterRef.current;
+    const person = personCanvasRef.current;
+    const maskC = maskCanvasRef.current;
+    if (!seg || !person || !maskC || segBusyRef.current) return;
+    if (video.readyState < 2 || !video.videoWidth) return;
+    const now = performance.now();
+    if (now - lastSegAtRef.current < 30) return; // cap ~33fps segmentation
+    lastSegAtRef.current = now;
+    segBusyRef.current = true;
+    try {
+      seg.segmentForVideo(video, now, (result) => {
+        try {
+          const mask: MPMask | undefined = result.categoryMask;
+          if (!mask) return;
+          const mw = mask.width, mh = mask.height;
+          const arr = mask.getAsUint8Array();
+          const invert = segmentInvertRef.current;
+          // Build mask ImageData + centroid
+          const img = new ImageData(mw, mh);
+          const d = img.data;
+          let sumX = 0, sumY = 0, cnt = 0;
+          // Head estimation: use top 25% band of foreground pixels for centroid
+          let topSumX = 0, topSumY = 0, topCnt = 0;
+          const topBand = Math.floor(mh * 0.35);
+          for (let y = 0; y < mh; y++) {
+            for (let x = 0; x < mw; x++) {
+              const i = y * mw + x;
+              const raw = arr[i];
+              const isPerson = invert ? raw === 0 : raw !== 0;
+              const a = isPerson ? 255 : 0;
+              const p = i * 4;
+              d[p] = 255; d[p + 1] = 255; d[p + 2] = 255; d[p + 3] = a;
+              if (isPerson) {
+                sumX += x; sumY += y; cnt++;
+                if (y < topBand) { topSumX += x; topSumY += y; topCnt++; }
+              }
+            }
+          }
+          if (topCnt > 200) {
+            headPosRef.current = { x: topSumX / topCnt / mw, y: topSumY / topCnt / mh };
+          } else if (cnt > 500) {
+            headPosRef.current = { x: sumX / cnt / mw, y: sumY / cnt / mh };
+          }
+          // paint mask
+          if (maskC.width !== mw || maskC.height !== mh) { maskC.width = mw; maskC.height = mh; }
+          const mctx = maskC.getContext("2d");
+          if (!mctx) return;
+          mctx.putImageData(img, 0, 0);
+          // feather via blur pass
+          const feather = featherRef.current;
+          // paint person canvas: video with mask as alpha
+          const vw = video.videoWidth, vh = video.videoHeight;
+          if (person.width !== vw || person.height !== vh) { person.width = vw; person.height = vh; }
+          const pctx = person.getContext("2d");
+          if (!pctx) return;
+          pctx.save();
+          pctx.clearRect(0, 0, vw, vh);
+          if (feather > 0) {
+            pctx.filter = `blur(${feather}px)`;
+            pctx.drawImage(maskC, 0, 0, vw, vh);
+            pctx.filter = "none";
+          } else {
+            pctx.drawImage(maskC, 0, 0, vw, vh);
+          }
+          pctx.globalCompositeOperation = "source-in";
+          pctx.drawImage(video, 0, 0, vw, vh);
+          pctx.restore();
+        } finally {
+          try { result.categoryMask?.close(); } catch {}
+          segBusyRef.current = false;
+        }
+      });
+    } catch {
+      segBusyRef.current = false;
+    }
+  };
+
+
+
+  const startScreen = useCallback(async () => {
+    try {
+      setError(null);
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 60 },
+        audio: false,
+      });
+      screenStreamRef.current = stream;
+      const v = screenVideoRef.current!;
+      v.srcObject = stream;
+      await v.play();
+      const track = stream.getVideoTracks()[0];
+      const s = track.getSettings();
+      setScreenMeta(`${track.label || "screen"} · ${s.width ?? "?"}×${s.height ?? "?"}`);
+      track.addEventListener("ended", () => {
+        setScreenReady(false);
+        setScreenMeta("");
+        screenStreamRef.current = null;
+      });
+      setScreenReady(true);
+    } catch (e: unknown) {
+      setError(`Screen: ${e instanceof Error ? e.message : "capture failed"}`);
+    }
+  }, []);
+
+  const startWebcam = useCallback(async () => {
+    try {
+      setError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: true,
+      });
+      webcamStreamRef.current = stream;
+      const v = webcamVideoRef.current!;
+      v.srcObject = stream;
+      await v.play();
+      const track = stream.getVideoTracks()[0];
+      const s = track.getSettings();
+      setWebcamMeta(`${track.label || "camera"} · ${s.width ?? "?"}×${s.height ?? "?"}`);
+      track.addEventListener("ended", () => {
+        setWebcamReady(false);
+        setWebcamMeta("");
+      });
+      setWebcamReady(true);
+    } catch (e: unknown) {
+      setError(`Webcam: ${e instanceof Error ? e.message : "capture failed"}`);
+    }
+  }, []);
+
+  const stopScreen = useCallback(() => {
+    screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+    screenStreamRef.current = null;
+    setScreenReady(false);
+    setScreenMeta("");
+  }, []);
+  const stopWebcam = useCallback(() => {
+    webcamStreamRef.current?.getTracks().forEach((t) => t.stop());
+    webcamStreamRef.current = null;
+    setWebcamReady(false);
+    setWebcamMeta("");
+  }, []);
+
+  const drawLayer = (
+    ctx: CanvasRenderingContext2D,
+    source: CanvasImageSource | null,
+    t: Transform,
+    opts: {
+      rounded?: boolean; radius?: number; shadow?: boolean;
+      shadowStrength?: number; shadowBlur?: number;
+      glowColor?: string; parallaxDx?: number; parallaxDy?: number; parallaxRot?: number;
+      ready?: boolean;
+    },
+  ) => {
+    const w = t.w * t.scale;
+    const h = t.h * t.scale;
+    const cx = t.x + t.w / 2 + (opts.parallaxDx ?? 0);
+    const cy = t.y + t.h / 2 + (opts.parallaxDy ?? 0);
+
+    ctx.save();
+    ctx.globalAlpha = t.opacity;
+    if (opts.shadow) {
+      ctx.shadowColor = opts.glowColor ?? `rgba(0,0,0,${opts.shadowStrength ?? 0.55})`;
+      ctx.shadowBlur = opts.shadowBlur ?? 60;
+      ctx.shadowOffsetY = opts.glowColor ? 0 : 24;
+    }
+    ctx.translate(cx, cy);
+    ctx.rotate(((t.rotation + (opts.parallaxRot ?? 0)) * Math.PI) / 180);
+    const sx = Math.tan((t.tiltY * Math.PI) / 180);
+    const sy = Math.tan((t.tiltX * Math.PI) / 180);
+    ctx.transform(1, sy, sx, 1, 0, 0);
+
+    if (opts.rounded) {
+      const r = Math.min(opts.radius ?? 24, w / 2, h / 2);
+      const x = -w / 2;
+      const y = -h / 2;
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+      ctx.clip();
+    }
+    if (source && opts.ready !== false) {
+      try { ctx.drawImage(source, -w / 2, -h / 2, w, h); } catch {}
+    } else {
+      ctx.fillStyle = "#111";
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.fillStyle = "rgba(255,255,255,0.4)";
+      ctx.font = "600 28px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText("no signal", 0, 0);
+    }
+    ctx.restore();
+  };
+
+  // Build a clip path matching a layer's transformed rounded rect.
+  // Caller must ctx.save() before and ctx.restore() after.
+  const clipToLayer = (
+    ctx: CanvasRenderingContext2D, t: Transform, radius: number,
+    parallax?: { dx: number; dy: number; rot: number },
+  ) => {
+    const w = t.w * t.scale;
+    const h = t.h * t.scale;
+    const cx = t.x + t.w / 2 + (parallax?.dx ?? 0);
+    const cy = t.y + t.h / 2 + (parallax?.dy ?? 0);
+    ctx.translate(cx, cy);
+    ctx.rotate(((t.rotation + (parallax?.rot ?? 0)) * Math.PI) / 180);
+    const sx = Math.tan((t.tiltY * Math.PI) / 180);
+    const sy = Math.tan((t.tiltX * Math.PI) / 180);
+    ctx.transform(1, sy, sx, 1, 0, 0);
+    const r = Math.min(radius, w / 2, h / 2);
+    const x = -w / 2, y = -h / 2;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+    ctx.clip();
+    // reset transform for subsequent world-space draws inside clip
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  };
+
+  // snapshot helpers for pause
+  const snapshotVideo = (v: HTMLVideoElement | null) => {
+    if (!v || v.readyState < 2) return null;
+    const c = document.createElement("canvas");
+    c.width = v.videoWidth || 1280;
+    c.height = v.videoHeight || 720;
+    const cx = c.getContext("2d");
+    if (!cx) return null;
+    cx.drawImage(v, 0, 0);
+    return c;
+  };
+  const togglePauseScreen = () => {
+    if (!screenPaused) screenFrozenRef.current = snapshotVideo(screenVideoRef.current);
+    else screenFrozenRef.current = null;
+    setScreenPaused((p) => !p);
+  };
+  const togglePauseWebcam = () => {
+    if (!webcamPaused) webcamFrozenRef.current = snapshotVideo(webcamVideoRef.current);
+    else webcamFrozenRef.current = null;
+    setWebcamPaused((p) => !p);
+  };
+
+  const drawTeleprompter = (ctx: CanvasRenderingContext2D, dt: number) => {
+    const teleState = teleprompterStateRef.current;
+    if (!teleState.isVisible || !teleState.script.trim()) return;
+
+    const panelX = CANVAS_W * 0.14;
+    const panelY = CANVAS_H * 0.1;
+    const panelW = CANVAS_W * 0.72;
+    const panelH = CANVAS_H * 0.8;
+    const padding = 56;
+    const fontSize = teleState.fontSize * 2.3;
+    const lineHeight = fontSize * 1.42;
+
+    if (teleState.isAutoScrolling) {
+      teleprompterOffsetRef.current += dt * teleState.scrollSpeed * 0.035;
+    }
+
+    ctx.save();
+    ctx.fillStyle = `rgba(2, 4, 10, ${Math.max(0.12, teleState.opacity / 180)})`;
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+
+    ctx.beginPath();
+    ctx.rect(panelX + padding, panelY + padding, panelW - padding * 2, panelH - padding * 2);
+    ctx.clip();
+
+    ctx.font = `700 ${fontSize}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1, teleState.opacity / 85)})`;
+
+    const words = teleState.script.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let currentLine = "";
+    const maxWidth = panelW - padding * 2;
+    for (const word of words) {
+      const trial = currentLine ? `${currentLine} ${word}` : word;
+      if (ctx.measureText(trial).width <= maxWidth) {
+        currentLine = trial;
+      } else {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+
+    const contentHeight = lines.length * lineHeight;
+    const maxOffset = Math.max(0, contentHeight - (panelH - padding * 2));
+    if (teleprompterOffsetRef.current > maxOffset) {
+      teleprompterOffsetRef.current = maxOffset;
+      if (teleState.isAutoScrolling) {
+        teleprompter.toggleAutoScroll();
+      }
+    }
+
+    let y = panelY + padding - teleprompterOffsetRef.current;
+    const centerX = panelX + panelW / 2;
+    for (const line of lines) {
+      ctx.fillText(line, centerX, y);
+      y += lineHeight;
+    }
+    ctx.restore();
+
+    ctx.save();
+    const fade = ctx.createLinearGradient(0, panelY, 0, panelY + panelH);
+    fade.addColorStop(0, "rgba(5, 6, 10, 0.98)");
+    fade.addColorStop(0.08, "rgba(5, 6, 10, 0)");
+    fade.addColorStop(0.92, "rgba(5, 6, 10, 0)");
+    fade.addColorStop(1, "rgba(5, 6, 10, 0.98)");
+    ctx.fillStyle = fade;
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.restore();
+  };
+
+  const drawLogoOverlay = (ctx: CanvasRenderingContext2D) => {
+    const image = logoImageRef.current;
+    if (!image || !logo.config.url) return;
+
+    const margin = 36;
+    const width = logo.config.size * 2.4;
+    const height = width * (image.naturalHeight / image.naturalWidth || 1);
+    let x = margin;
+    let y = margin;
+    if (logo.config.position.includes("right")) x = CANVAS_W - width - margin;
+    if (logo.config.position.includes("bottom")) y = CANVAS_H - height - margin;
+
+    ctx.save();
+    ctx.globalAlpha = logo.config.opacity / 100;
+    ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+    ctx.shadowBlur = 20;
+    ctx.drawImage(image, x, y, width, height);
+    ctx.restore();
+  };
+
+  const handleTeleprompterReset = () => {
+    teleprompterOffsetRef.current = 0;
+    teleprompter.resetScroll();
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let lastT = performance.now();
+    let frames = 0;
+    let fpsAcc = 0;
+    let maxFrame = 0;
+    let slowStreak = 0;
+    let lastQualityShift = performance.now();
+
+    const loop = (now: number) => {
+      const dt = now - lastT;
+      lastT = now;
+      frames++;
+      fpsAcc += dt;
+      if (dt > maxFrame) maxFrame = dt;
+
+      if (fpsAcc >= 500) {
+        const currentFps = Math.round((frames * 1000) / fpsAcc);
+        setFps(currentFps);
+        setFrameMs(Math.round(maxFrame));
+
+        // Auto-quality scaling
+        if (autoQuality) {
+          const q = qualityRef.current;
+          const now2 = performance.now();
+          if (currentFps < 24 && q !== "low" && now2 - lastQualityShift > 2500) {
+            slowStreak++;
+            if (slowStreak >= 2) {
+              setQuality(q === "high" ? "medium" : "low");
+              setPerfWarn(`Auto-reduced quality to ${q === "high" ? "medium" : "low"} (fps ${currentFps})`);
+              lastQualityShift = now2;
+              slowStreak = 0;
+            }
+          } else if (currentFps > 55 && q !== "high" && now2 - lastQualityShift > 6000) {
+            setQuality(q === "low" ? "medium" : "high");
+            lastQualityShift = now2;
+            slowStreak = 0;
+          } else {
+            slowStreak = Math.max(0, slowStreak - 1);
+          }
+        }
+
+        frames = 0;
+        fpsAcc = 0;
+        maxFrame = 0;
+      }
+
+      const qs = QUALITY_SETTINGS[qualityRef.current];
+      const tSec = now / 1000;
+
+      // background
+      const bgImg = customBgImgRef.current;
+      if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
+        // cover-fit custom image
+        const ir = bgImg.naturalWidth / bgImg.naturalHeight;
+        const cr = CANVAS_W / CANVAS_H;
+        let dw = CANVAS_W, dh = CANVAS_H, dx = 0, dy = 0;
+        if (ir > cr) { dh = CANVAS_H; dw = dh * ir; dx = (CANVAS_W - dw) / 2; }
+        else { dw = CANVAS_W; dh = dw / ir; dy = (CANVAS_H - dh) / 2; }
+        try { ctx.drawImage(bgImg, dx, dy, dw, dh); } catch {}
+      } else if (bgTone === "black") {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      } else if (bgTone === "studio") {
+        const g = ctx.createRadialGradient(
+          CANVAS_W / 2, CANVAS_H / 2, 100,
+          CANVAS_W / 2, CANVAS_H / 2, 1200,
+        );
+        g.addColorStop(0, "#1a1d29");
+        g.addColorStop(1, "#05060a");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      } else if (bgTone === "aurora") {
+        ctx.fillStyle = "#04050a";
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+        const a1 = ctx.createRadialGradient(
+          CANVAS_W * (0.3 + Math.sin(tSec * 0.15) * 0.05), CANVAS_H * 0.4, 40,
+          CANVAS_W * 0.3, CANVAS_H * 0.4, 900,
+        );
+        a1.addColorStop(0, "rgba(99,102,241,0.55)");
+        a1.addColorStop(1, "rgba(99,102,241,0)");
+        ctx.fillStyle = a1;
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+        const a2 = ctx.createRadialGradient(
+          CANVAS_W * (0.75 + Math.cos(tSec * 0.2) * 0.05), CANVAS_H * 0.7, 40,
+          CANVAS_W * 0.75, CANVAS_H * 0.7, 900,
+        );
+        a2.addColorStop(0, "rgba(236,72,153,0.45)");
+        a2.addColorStop(1, "rgba(236,72,153,0)");
+        ctx.fillStyle = a2;
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      } else {
+        ctx.fillStyle = "#0a0a0f";
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+        ctx.strokeStyle = "rgba(255,255,255,0.04)";
+        ctx.lineWidth = 1;
+        for (let x = 0; x < CANVAS_W; x += 80) {
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke();
+        }
+        for (let y = 0; y < CANVAS_H; y += 80) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_W, y); ctx.stroke();
+        }
+      }
+
+      // Kick segmentation on live webcam every loop (throttled inside)
+      const wvLive = webcamVideoRef.current;
+      if (segmentEnabledRef.current && !webcamPaused && wvLive && segmenterRef.current) {
+        runSegmentation(wvLive);
+      }
+
+      // Smooth head position → screen parallax
+      const hp = headPosRef.current;
+      const hs = headSmoothRef.current;
+      const alpha = 0.15;
+      hs.x = hs.x + (hp.x - hs.x) * alpha;
+      hs.y = hs.y + (hp.y - hs.y) * alpha;
+
+      // Auto parallax breathing — subtle drift on screen layer
+      const breathe = autoParallaxRef.current
+        ? { dx: Math.sin(tSec * 0.5) * 6, dy: Math.cos(tSec * 0.4) * 4, rot: Math.sin(tSec * 0.3) * 0.4 }
+        : { dx: 0, dy: 0, rot: 0 };
+      // Face-driven parallax — invert x (webcam is mirrored feel), amplify small movements
+      const facePar = (segmentEnabledRef.current && faceParallaxRef.current)
+        ? {
+            dx: -(hs.x - 0.5) * 2 * parallaxStrengthRef.current,
+            dy: (hs.y - 0.5) * 2 * parallaxStrengthRef.current * 0.6,
+            rot: -(hs.x - 0.5) * 4,
+          }
+        : { dx: 0, dy: 0, rot: 0 };
+      const parallax = {
+        dx: breathe.dx + facePar.dx,
+        dy: breathe.dy + facePar.dy,
+        rot: breathe.rot + facePar.rot,
+      };
+
+      const useSegmentedWebcam = segmentEnabledRef.current && !webcamPaused && !!personCanvasRef.current;
+      const modeClipped = useSegmentedWebcam && segmentModeRef.current === "screen-clipped";
+
+      const sv = screenVideoRef.current;
+      const wv = webcamVideoRef.current;
+      const screenSrc: CanvasImageSource | null = screenPaused ? screenFrozenRef.current : sv;
+      const screenReady2 = screenPaused ? !!screenFrozenRef.current : !!sv && sv.readyState >= 2;
+      const rawWebcamSrc: CanvasImageSource | null = webcamPaused ? webcamFrozenRef.current : wv;
+      const rawWebcamReady = webcamPaused ? !!webcamFrozenRef.current : !!wv && wv.readyState >= 2;
+      const personSrc = personCanvasRef.current;
+      const personReady = !!(personSrc && personSrc.width > 0);
+
+      const drawScreen = () => drawLayer(ctx, screenSrc, screenT.current, {
+        rounded: true, radius: 18,
+        shadow, shadowStrength: 0.6, shadowBlur: qs.shadowBlur,
+        parallaxDx: parallax.dx, parallaxDy: parallax.dy, parallaxRot: parallax.rot,
+        ready: screenReady2,
+      });
+      const drawWebcamRaw = () => {
+        if (cinematicRef.current && shadow) {
+          drawLayer(ctx, null, webcamT.current, {
+            rounded, radius: roundedRadius,
+            shadow: true, shadowBlur: 90,
+            glowColor: "rgba(120,140,255,0.55)", ready: false,
+          });
+        }
+        drawLayer(ctx, rawWebcamSrc, webcamT.current, {
+          rounded, radius: roundedRadius,
+          shadow, shadowStrength: 0.75, shadowBlur: qs.shadowBlur,
+          ready: rawWebcamReady,
+        });
+      };
+      const drawWebcamCutout = () => drawLayer(ctx, personSrc, webcamT.current, {
+        rounded: false, radius: roundedRadius,
+        shadow: false, ready: personReady,
+      });
+
+      if (modeClipped) {
+        // (a) Full webcam base — you're always visible in your setting
+        drawWebcamRaw();
+        // (b) Screen on top — covers part of the webcam view
+        drawScreen();
+        // (c) Person cutout, clipped to screen's transformed rounded rect —
+        //     silhouette only pushes through where it overlaps the screen
+        if (personReady) {
+          ctx.save();
+          clipToLayer(ctx, screenT.current, 18, parallax);
+          drawWebcamCutout();
+          ctx.restore();
+        }
+      } else if (useSegmentedWebcam) {
+        // Classic: screen behind, silhouette in front (no background)
+        drawScreen();
+        drawWebcamCutout();
+      } else {
+        // No segmentation — normal ordered rectangles
+        for (const key of order) {
+          if (key === "screen") drawScreen();
+          else drawWebcamRaw();
+        }
+      }
+
+
+      // cinematic vignette
+      if (cinematicRef.current) {
+        const vg = ctx.createRadialGradient(
+          CANVAS_W / 2, CANVAS_H / 2, CANVAS_H * 0.4,
+          CANVAS_W / 2, CANVAS_H / 2, CANVAS_H * 0.85,
+        );
+        vg.addColorStop(0, "rgba(0,0,0,0)");
+        vg.addColorStop(1, "rgba(0,0,0,0.55)");
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      }
+
+      // BRB overlay
+      if (brbActive) {
+        ctx.save();
+        ctx.fillStyle = "rgba(4,6,14,0.88)";
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+        const pulse = 0.85 + Math.sin(tSec * 2) * 0.15;
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.font = "800 140px system-ui, -apple-system, sans-serif";
+        ctx.shadowColor = "rgba(120,140,255,0.9)";
+        ctx.shadowBlur = 60;
+        ctx.fillText(brbText || "BE RIGHT BACK", CANVAS_W / 2, CANVAS_H / 2 - 20);
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 0.75;
+        ctx.font = "400 34px system-ui, -apple-system, sans-serif";
+        ctx.fillStyle = "#c7d0ff";
+        ctx.fillText(brbSubtext || "", CANVAS_W / 2, CANVAS_H / 2 + 80);
+        // spinner dots
+        for (let i = 0; i < 3; i++) {
+          const a = (Math.sin(tSec * 3 - i * 0.6) + 1) / 2;
+          ctx.globalAlpha = 0.3 + a * 0.7;
+          ctx.beginPath();
+          ctx.arc(CANVAS_W / 2 - 40 + i * 40, CANVAS_H / 2 + 160, 8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      if (!brbActive) {
+        drawTeleprompter(ctx, dt);
+      }
+      drawLogoOverlay(ctx);
+
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [shadow, rounded, roundedRadius, bgTone, order, autoQuality, screenPaused, webcamPaused, brbActive, brbText, brbSubtext, teleprompter, logo.config]);
+
+  // recording timer
+  useEffect(() => {
+    if (!recording || recStart === null) return;
+    const id = setInterval(() => setRecElapsed(Date.now() - recStart), 250);
+    return () => clearInterval(id);
+  }, [recording, recStart]);
+
+  const dragRef = useRef<DragState>(null);
+
+  const overlayToCanvas = (clientX: number, clientY: number) => {
+    const el = overlayRef.current!;
+    const rect = el.getBoundingClientRect();
+    return {
+      x: ((clientX - rect.left) / rect.width) * CANVAS_W,
+      y: ((clientY - rect.top) / rect.height) * CANVAS_H,
+    };
+  };
+
+  const snap = (v: number) => (snapRef.current ? Math.round(v / GRID_SIZE) * GRID_SIZE : v);
+
+  const commitTransform = (layer: LayerKey, t: Transform) => {
+    if (layer === "screen") {
+      screenT.current = t;
+      setScreenState(t);
+    } else {
+      webcamT.current = t;
+      setWebcamState(t);
+    }
+  };
+
+  const onPointerDownLayer = (
+    e: React.PointerEvent,
+    layer: LayerKey,
+    mode: "move" | "resize" | "rotate",
+    corner?: "nw" | "ne" | "sw" | "se",
+  ) => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture(e.pointerId);
+    setSelected(layer);
+    const p = overlayToCanvas(e.clientX, e.clientY);
+    const cur = layer === "screen" ? screenT.current : webcamT.current;
+    if (mode === "move") {
+      dragRef.current = { type: "move", layer, startX: p.x, startY: p.y, origX: cur.x, origY: cur.y };
+    } else if (mode === "resize") {
+      dragRef.current = {
+        type: "resize", layer, corner: corner!,
+        startX: p.x, startY: p.y, orig: { ...cur },
+      };
+    } else {
+      const cx = cur.x + cur.w / 2;
+      const cy = cur.y + cur.h / 2;
+      dragRef.current = {
+        type: "rotate", layer, cx, cy,
+        startAngle: Math.atan2(p.y - cy, p.x - cx),
+        origRot: cur.rotation,
+      };
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const p = overlayToCanvas(e.clientX, e.clientY);
+    if (d.type === "move") {
+      const cur = d.layer === "screen" ? screenT.current : webcamT.current;
+      commitTransform(d.layer, {
+        ...cur,
+        x: snap(d.origX + (p.x - d.startX)),
+        y: snap(d.origY + (p.y - d.startY)),
+      });
+    } else if (d.type === "resize") {
+      const dx = p.x - d.startX;
+      const dy = p.y - d.startY;
+      const o = d.orig;
+      let nx = o.x, ny = o.y, nw = o.w, nh = o.h;
+      if (d.corner === "se") { nw = Math.max(80, o.w + dx); nh = Math.max(60, o.h + dy); }
+      else if (d.corner === "sw") { nw = Math.max(80, o.w - dx); nh = Math.max(60, o.h + dy); nx = o.x + (o.w - nw); }
+      else if (d.corner === "ne") { nw = Math.max(80, o.w + dx); nh = Math.max(60, o.h - dy); ny = o.y + (o.h - nh); }
+      else { nw = Math.max(80, o.w - dx); nh = Math.max(60, o.h - dy); nx = o.x + (o.w - nw); ny = o.y + (o.h - nh); }
+      if (e.shiftKey) { const ar = o.w / o.h; nh = nw / ar; }
+      commitTransform(d.layer, { ...o, x: snap(nx), y: snap(ny), w: snap(nw), h: snap(nh) });
+    } else if (d.type === "rotate") {
+      const a = Math.atan2(p.y - d.cy, p.x - d.cx);
+      let deg = d.origRot + ((a - d.startAngle) * 180) / Math.PI;
+      if (e.shiftKey) deg = Math.round(deg / 15) * 15;
+      const cur = d.layer === "screen" ? screenT.current : webcamT.current;
+      commitTransform(d.layer, { ...cur, rotation: deg });
+    }
+  };
+
+  const onPointerUp = () => { dragRef.current = null; };
+
+  // Hotkey nudge
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      const step = e.shiftKey ? 20 : e.altKey ? 1 : 5;
+      const cur = selected === "screen" ? screenT.current : webcamT.current;
+      if (e.key === "ArrowLeft") { commitTransform(selected, { ...cur, x: cur.x - step }); e.preventDefault(); }
+      else if (e.key === "ArrowRight") { commitTransform(selected, { ...cur, x: cur.x + step }); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { commitTransform(selected, { ...cur, y: cur.y - step }); e.preventDefault(); }
+      else if (e.key === "ArrowDown") { commitTransform(selected, { ...cur, y: cur.y + step }); e.preventDefault(); }
+      else if (e.key === "[") { commitTransform(selected, { ...cur, rotation: cur.rotation - (e.shiftKey ? 5 : 1) }); }
+      else if (e.key === "]") { commitTransform(selected, { ...cur, rotation: cur.rotation + (e.shiftKey ? 5 : 1) }); }
+      else if (e.key === "Tab") { setSelected((s) => (s === "screen" ? "webcam" : "screen")); e.preventDefault(); }
+      else if (e.key === "b" || e.key === "B") { setBrbActive((v) => !v); e.preventDefault(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected]);
+
+  // Alt = click-through the topmost visual layer (grab layer underneath)
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => { if (e.key === "Alt") setAltHeld(true); };
+    const up   = (e: KeyboardEvent) => { if (e.key === "Alt") setAltHeld(false); };
+    const blur = () => setAltHeld(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
+
+  // ================ Streaming (local FFmpeg bridge → RTMP) ================
+  const startStream = useCallback(async () => {
+    setStreamStatus("");
+    if (!streamUrl.trim() || !streamKey.trim()) {
+      setStreamStatus("Enter Stream URL and Stream Key");
+      return;
+    }
+    const canvas = canvasRef.current;
+    if (!canvas) { setStreamStatus("Canvas not ready"); return; }
+    const stream = canvas.captureStream(streamFps);
+    webcamStreamRef.current?.getAudioTracks().forEach((t) => stream.addTrack(t));
+    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+      ? "video/webm;codecs=vp8,opus"
+      : "video/webm";
+    let rec: MediaRecorder;
+    try {
+      rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: streamBitrate * 1000 });
+    } catch (e) {
+      setStreamStatus("MediaRecorder init failed: " + (e instanceof Error ? e.message : "unknown"));
+      return;
+    }
+    streamRecRef.current = rec;
+
+    let pushChunk: ((u8: Uint8Array) => void) | null = null;
+    let closeStream: (() => void) | null = null;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        pushChunk = (u8) => { try { controller.enqueue(u8); } catch {} };
+        closeStream = () => { try { controller.close(); } catch {} };
+      },
+    });
+
+    rec.ondataavailable = async (e) => {
+      if (!e.data.size) return;
+      const buf = new Uint8Array(await e.data.arrayBuffer());
+      pushChunk?.(buf);
+    };
+    rec.onstop = () => { closeStream?.(); };
+    rec.onerror = (ev) => { setStreamStatus("Recorder error: " + String(ev)); };
+
+    const q = new URLSearchParams({
+      url: streamUrl.trim(),
+      key: streamKey.trim(),
+      bitrate: String(streamBitrate),
+      keyframe: String(streamKeyframe),
+      fps: String(streamFps),
+    });
+    const ingest = `http://localhost:${bridgePort}/ingest?${q.toString()}`;
+    const ac = new AbortController();
+    streamAbortRef.current = ac;
+    rec.start(500);
+    setStreaming(true);
+    setStreamStatus(`connecting → ${ingest}`);
+    try {
+      // Chrome requires duplex:'half' for streaming request bodies
+      const res = await fetch(ingest, {
+        method: "POST",
+        body,
+        signal: ac.signal,
+        // @ts-expect-error chrome-only streaming body option
+        duplex: "half",
+        headers: { "Content-Type": "video/webm" },
+      });
+      setStreamStatus(`bridge: ${res.status} ${res.statusText || ""}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "fetch failed";
+      if (!msg.includes("aborted")) {
+        setStreamStatus(
+          `Bridge unreachable on :${bridgePort}. Run the local bridge (see Streaming panel) or use cloud fallback.`,
+        );
+      }
+    } finally {
+      try { rec.state !== "inactive" && rec.stop(); } catch {}
+      setStreaming(false);
+      streamRecRef.current = null;
+      streamAbortRef.current = null;
+    }
+  }, [streamUrl, streamKey, streamBitrate, streamFps, streamKeyframe, bridgePort]);
+
+  const stopStream = useCallback(() => {
+    try { streamRecRef.current?.stop(); } catch {}
+    try { streamAbortRef.current?.abort(); } catch {}
+    setStreaming(false);
+    setStreamStatus("stopped");
+  }, []);
+
+  const downloadBridgeScript = useCallback(() => {
+    const script = String.raw`#!/usr/bin/env node
+// parallax-bridge.js — local RTMP push bridge for Parallax Studio.
+//
+// Prereqs (macOS):  brew install ffmpeg node
+// Prereqs (Linux):  sudo apt install ffmpeg nodejs
+// Prereqs (Win):    install ffmpeg + Node.js, add to PATH.
+//
+// Run:              node parallax-bridge.js
+// The bridge listens on http://localhost:${bridgePort} and pipes the WebM
+// stream from your browser into ffmpeg, which re-encodes to H.264/AAC and
+// pushes to your RTMP endpoint (Kick, Twitch, YouTube, Restream, etc).
+//
+// Kick: Stream URL is  rtmps://fa723fc1b171.global-contribute.live-video.net/app/
+//       Stream Key comes from your Kick dashboard.
+//
+// Security: only bind localhost. Do NOT expose to the internet.
+
+const http = require('http');
+const { spawn } = require('child_process');
+const PORT = ${bridgePort};
+
+http.createServer((req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  if (req.method !== 'POST' || !req.url.startsWith('/ingest')) {
+    res.writeHead(404); res.end('parallax bridge — POST /ingest'); return;
+  }
+  const u = new URL(req.url, 'http://localhost');
+  const rtmpUrl  = u.searchParams.get('url');
+  const streamKey = u.searchParams.get('key');
+  const bitrate  = u.searchParams.get('bitrate')  || '6000';
+  const kf       = u.searchParams.get('keyframe') || '2';
+  const fps      = u.searchParams.get('fps')      || '60';
+  if (!rtmpUrl || !streamKey) { res.writeHead(400); res.end('missing url/key'); return; }
+  const dest = rtmpUrl.replace(/\/+$/, '') + '/' + streamKey;
+  console.log('[bridge]', new Date().toISOString(), 'streaming →', dest.replace(streamKey, '***'));
+  const args = [
+    '-hide_banner', '-loglevel', 'warning',
+    '-fflags', '+genpts', '-re',
+    '-i', 'pipe:0',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-pix_fmt', 'yuv420p',
+    '-b:v', bitrate + 'k', '-maxrate', bitrate + 'k', '-bufsize', (Number(bitrate) * 2) + 'k',
+    '-g', String(Number(fps) * Number(kf)), '-keyint_min', String(Number(fps) * Number(kf)),
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '44100',
+    '-f', 'flv', dest,
+  ];
+  const ff = spawn('ffmpeg', args, { stdio: ['pipe', 'inherit', 'inherit'] });
+  req.pipe(ff.stdin);
+  const cleanup = (why) => { console.log('[bridge] cleanup:', why); try { ff.stdin.end(); } catch {} };
+  req.on('end',   () => cleanup('client end'));
+  req.on('close', () => cleanup('client close'));
+  req.on('error', (e) => cleanup('client error ' + e.message));
+  ff.on('exit', (code) => { console.log('[bridge] ffmpeg exit', code); try { res.end('ok'); } catch {} });
+}).listen(PORT, '127.0.0.1', () => {
+  console.log('parallax-bridge listening on http://localhost:' + PORT);
+  console.log('point your browser Streaming panel at this port and hit "Go Live".');
+});
+`;
+    const blob = new Blob([script], { type: "application/javascript" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "parallax-bridge.js";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }, [bridgePort]);
+
+
+  const startRecording = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const stream = canvas.captureStream(60);
+    webcamStreamRef.current?.getAudioTracks().forEach((t) => stream.addTrack(t));
+    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+      ? "video/webm;codecs=vp9"
+      : "video/webm";
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    recordedChunksRef.current = [];
+    rec.ondataavailable = (e) => e.data.size > 0 && recordedChunksRef.current.push(e.data);
+    rec.onstop = () => {
+      const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `parallax-${Date.now()}.webm`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    rec.start(1000);
+    recorderRef.current = rec;
+    setRecording(true);
+    setRecStart(Date.now());
+    setRecElapsed(0);
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRecording(false);
+    setRecStart(null);
+  }, []);
+
+  useEffect(() => () => {
+    screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+    webcamStreamRef.current?.getTracks().forEach((t) => t.stop());
+    recorderRef.current?.stop();
+  }, []);
+
+  const layer = selected === "screen" ? screenState : webcamState;
+  const setField = <K extends keyof Transform>(k: K, v: Transform[K]) => {
+    const cur = selected === "screen" ? screenT.current : webcamT.current;
+    commitTransform(selected, { ...cur, [k]: v });
+  };
+  const resetLayer = () => {
+    commitTransform(selected, selected === "screen" ? defaultScreen : defaultWebcam);
+  };
+  const swapOrder = () => setOrder((o) => [o[1], o[0]]);
+
+  // Presets
+  const savePreset = () => {
+    const name = presetName.trim() || `Scene ${presets.length + 1}`;
+    const preset: Preset = {
+      id: `p_${Date.now()}`,
+      name,
+      screen: { ...screenT.current },
+      webcam: { ...webcamT.current },
+      order: [...order],
+      bgTone, shadow, rounded, roundedRadius,
+      createdAt: Date.now(),
+    };
+    persistPresets([preset, ...presets]);
+    setPresetName("");
+  };
+  const loadPreset = (p: Preset) => {
+    commitTransform("screen", p.screen);
+    commitTransform("webcam", p.webcam);
+    setOrder(p.order);
+    setBgTone(p.bgTone);
+    setShadow(p.shadow);
+    setRounded(p.rounded);
+    setRoundedRadius(p.roundedRadius);
+  };
+  const deletePreset = (id: string) => persistPresets(presets.filter((p) => p.id !== id));
+  const exportPresets = () => {
+    const blob = new Blob([JSON.stringify(presets, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `parallax-presets-${Date.now()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const importPresets = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(String(reader.result));
+        if (Array.isArray(data)) persistPresets([...data, ...presets]);
+      } catch {
+        setError("Preset import failed: invalid JSON");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const fpsState: "good" | "warn" | "bad" =
+    fps >= 50 ? "good" : fps >= 30 ? "warn" : "bad";
+  const fpsColor = fpsState === "good" ? "bg-emerald-500" : fpsState === "warn" ? "bg-amber-500" : "bg-red-500";
+
+  const outOfSafe = useMemo(() => {
+    const bad = (t: Transform) =>
+      t.x < SAFE_MARGIN ||
+      t.y < SAFE_MARGIN ||
+      t.x + t.w > CANVAS_W - SAFE_MARGIN ||
+      t.y + t.h > CANVAS_H - SAFE_MARGIN;
+    return { screen: bad(screenState), webcam: bad(webcamState) };
+  }, [screenState, webcamState]);
+
+  const recSecs = Math.floor(recElapsed / 1000);
+  const recLabel = `${String(Math.floor(recSecs / 60)).padStart(2, "0")}:${String(recSecs % 60).padStart(2, "0")}`;
+  const sectionClassName = "rounded-[28px] border border-white/10 bg-black/25 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.22)] backdrop-blur-xl";
+  const quickCardClassName = "rounded-[28px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_10px_30px_rgba(0,0,0,0.18)]";
+
+  return (
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(220,38,38,0.16),transparent_28%),radial-gradient(circle_at_80%_20%,rgba(99,102,241,0.18),transparent_30%),linear-gradient(180deg,#06070b_0%,#090b12_100%)] text-foreground flex flex-col">
+      <header className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary via-primary to-destructive shadow-lg shadow-primary/20" />
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold leading-none">ScriptCam Parallax</h1>
+              <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
+                Primary Studio
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">Free-form screen + webcam compositor with layered creator tools</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <button
+            onClick={() => setShowCreatorTools(true)}
+            className="rounded-xl border border-border bg-card px-3 py-2 text-foreground transition hover:bg-accent hover:text-accent-foreground"
+          >
+            Creator Tools
+          </button>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-muted">
+            <span className={`w-2 h-2 rounded-full ${fpsColor}`} />
+            <span className="tabular-nums">{fps} fps</span>
+            <span className="text-muted-foreground">· {frameMs}ms peak</span>
+          </div>
+          <span className="px-2 py-1 rounded bg-muted">
+            Q: {quality}
+          </span>
+          <span className="px-2 py-1 rounded bg-muted">
+            {CANVAS_W}×{CANVAS_H} · edit=out
+          </span>
+          <div className="flex items-center gap-1 px-2 py-1 rounded bg-muted">
+            <span className={`w-2 h-2 rounded-full ${screenReady ? "bg-emerald-500" : "bg-zinc-600"}`} />
+            <span>screen</span>
+            <span className={`ml-2 w-2 h-2 rounded-full ${webcamReady ? "bg-emerald-500" : "bg-zinc-600"}`} />
+            <span>cam</span>
+          </div>
+          {brbActive && (
+            <span className="px-2 py-1 rounded bg-indigo-500 text-white animate-pulse">BRB</span>
+          )}
+          {(screenPaused || webcamPaused) && (
+            <span className="px-2 py-1 rounded bg-amber-500 text-black">
+              ❚❚ {screenPaused && webcamPaused ? "both" : screenPaused ? "screen" : "cam"}
+            </span>
+          )}
+          {recording && (
+            <span className="px-2 py-1 rounded bg-destructive text-destructive-foreground animate-pulse tabular-nums">
+              ● REC {recLabel}
+            </span>
+          )}
+        </div>
+      </header>
+
+      {perfWarn && (
+        <div className="px-6 py-2 bg-amber-500/15 border-b border-amber-500/30 text-amber-200 text-xs flex justify-between">
+          <span>⚠ {perfWarn}</span>
+          <button onClick={() => setPerfWarn(null)} className="opacity-70 hover:opacity-100">dismiss</button>
+        </div>
+      )}
+
+      <div className="flex flex-1 min-h-0">
+        <aside className="w-[23rem] border-r border-white/10 bg-black/25 p-4 space-y-4 overflow-y-auto backdrop-blur-xl">
+          <section className={`${quickCardClassName} space-y-3`}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Primary Workflow</p>
+                <h2 className="mt-1 text-base font-semibold text-foreground">ScriptCam Parallax Studio</h2>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Keep the scene builder here, then pull in the older recorder tools only when they add value.</p>
+              </div>
+              <button
+                onClick={() => setShowCreatorTools(true)}
+                className="rounded-2xl border border-primary/30 bg-primary/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary transition hover:bg-primary hover:text-primary-foreground"
+              >
+                Open Tools
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-muted-foreground">Teleprompter</p>
+                <p className="mt-1 font-medium text-foreground">{teleprompter.state.script.trim() ? (teleprompter.state.isVisible ? "Live in scene" : "Loaded") : "Empty"}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-muted-foreground">Watermark</p>
+                <p className="mt-1 font-medium text-foreground">{logo.hasLogo ? "Visible in output" : "Not added"}</p>
+              </div>
+            </div>
+          </section>
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Sources</h2>
+            <div className="flex gap-1">
+              <button
+                onClick={screenReady ? stopScreen : startScreen}
+                className={`flex-1 text-sm rounded-md px-3 py-2 border transition ${
+                  screenReady ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
+                }`}
+              >
+                {screenReady ? "Stop Screen" : "Share Screen"}
+              </button>
+              <button
+                onClick={togglePauseScreen}
+                disabled={!screenReady && !screenPaused}
+                title="Freeze / resume screen"
+                className={`text-xs rounded-md px-2 border transition disabled:opacity-40 ${
+                  screenPaused ? "bg-amber-500 text-black border-amber-500" : "bg-card hover:bg-accent border-border"
+                }`}
+              >
+                {screenPaused ? "▶" : "❚❚"}
+              </button>
+            </div>
+            {screenMeta && <p className="text-[10px] text-muted-foreground truncate" title={screenMeta}>{screenMeta}{screenPaused && " · PAUSED"}</p>}
+            <div className="flex gap-1">
+              <button
+                onClick={webcamReady ? stopWebcam : startWebcam}
+                className={`flex-1 text-sm rounded-md px-3 py-2 border transition ${
+                  webcamReady ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
+                }`}
+              >
+                {webcamReady ? "Stop Webcam" : "Start Webcam"}
+              </button>
+              <button
+                onClick={togglePauseWebcam}
+                disabled={!webcamReady && !webcamPaused}
+                title="Freeze / resume webcam"
+                className={`text-xs rounded-md px-2 border transition disabled:opacity-40 ${
+                  webcamPaused ? "bg-amber-500 text-black border-amber-500" : "bg-card hover:bg-accent border-border"
+                }`}
+              >
+                {webcamPaused ? "▶" : "❚❚"}
+              </button>
+            </div>
+            {webcamMeta && <p className="text-[10px] text-muted-foreground truncate" title={webcamMeta}>{webcamMeta}{webcamPaused && " · PAUSED"}</p>}
+            {error && <p className="text-xs text-destructive bg-destructive/10 rounded p-2">{error}</p>}
+          </section>
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">BRB / Waiting Screen</h2>
+            <button
+              onClick={() => setBrbActive((v) => !v)}
+              className={`w-full text-sm rounded-md px-3 py-2 border transition ${
+                brbActive ? "bg-indigo-500 text-white border-indigo-500 animate-pulse" : "bg-card hover:bg-accent border-border"
+              }`}
+            >
+              {brbActive ? "Hide waiting overlay" : "Show \"We'll be back\" overlay"}
+            </button>
+            <input value={brbText} onChange={(e) => setBrbText(e.target.value)}
+              placeholder="Headline" className="w-full bg-input rounded px-2 py-1 border border-border text-xs" />
+            <input value={brbSubtext} onChange={(e) => setBrbSubtext(e.target.value)}
+              placeholder="Subtext" className="w-full bg-input rounded px-2 py-1 border border-border text-xs" />
+          </section>
+
+          <section className={`${sectionClassName} space-y-3`}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Creator Overlay Tools</h2>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">These legacy tools now render directly into the Parallax output.</p>
+              </div>
+              <button
+                onClick={() => setShowCreatorTools(true)}
+                className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              >
+                Drawer
+              </button>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <button
+                onClick={() => setShowTeleprompterEditor(true)}
+                className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-left transition hover:bg-white/[0.08]"
+              >
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground"><FileText className="h-4 w-4 text-primary" /> Teleprompter</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">Write your script once, then run it inside the recorded scene.</p>
+              </button>
+              <button
+                onClick={() => setShowLogoUploader(true)}
+                className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-left transition hover:bg-white/[0.08]"
+              >
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground"><ImageIcon className="h-4 w-4 text-primary" /> Logo / Watermark</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">Add a logo that becomes part of the exported frame.</p>
+              </button>
+            </div>
+            <div className="grid gap-2 text-xs">
+              <label className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                <span>Show teleprompter in output</span>
+                <input type="checkbox" checked={teleprompter.state.isVisible} onChange={() => teleprompter.toggleVisible()} />
+              </label>
+              {teleprompter.state.isVisible && (
+                <>
+                  <label className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <span>Auto-scroll</span>
+                    <input type="checkbox" checked={teleprompter.state.isAutoScrolling} onChange={() => teleprompter.toggleAutoScroll()} />
+                  </label>
+                  <Slider label="Prompt speed" value={teleprompter.state.scrollSpeed} min={1} max={10} step={1} onChange={teleprompter.setScrollSpeed} />
+                  <Slider label="Prompt size" value={teleprompter.state.fontSize} min={18} max={40} step={1} suffix="px" onChange={teleprompter.setFontSize} />
+                  <Slider label="Prompt opacity" value={teleprompter.state.opacity} min={25} max={90} step={1} suffix="%" onChange={teleprompter.setOpacity} />
+                  <button
+                    onClick={handleTeleprompterReset}
+                    className="rounded-xl border border-white/10 bg-card px-3 py-2 text-xs transition hover:bg-accent"
+                  >
+                    Reset prompt position
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Depth · Person Cutout</h2>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded ${segmentReady ? "bg-emerald-500/20 text-emerald-400" : segmentLoading ? "bg-amber-500/20 text-amber-400" : "bg-zinc-700 text-zinc-400"}`}>
+                {segmentLoading ? "loading model…" : segmentReady ? "live" : "off"}
+              </span>
+            </div>
+            <button
+              onClick={() => setSegmentEnabled((v) => !v)}
+              className={`w-full text-sm rounded-md px-3 py-2 border transition ${
+                segmentEnabled ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
+              }`}
+            >
+              {segmentEnabled ? "Disable person cutout" : "Enable person cutout (behind screen)"}
+            </button>
+            <p className="text-[10px] text-muted-foreground leading-relaxed">
+              Uses on-device MediaPipe Selfie Segmentation to remove your background so the screen renders <em>behind</em> you — hair, shoulders, and hands actually occlude it.
+            </p>
+            {segmentError && <p className="text-[10px] text-destructive bg-destructive/10 rounded p-1.5">{segmentError}</p>}
+            {segmentEnabled && (
+              <>
+                <div className="grid grid-cols-2 gap-1 text-[11px]">
+                  {(["screen-clipped", "full-cutout"] as const).map((m) => (
+                    <button key={m} onClick={() => setSegmentMode(m)}
+                      className={`rounded px-2 py-1 border ${segmentMode === m ? "bg-accent border-primary" : "bg-card border-border"}`}
+                      title={m === "screen-clipped"
+                        ? "Full webcam visible; cutout only applies where screen overlaps"
+                        : "Classic silhouette on top; background disappears"}>
+                      {m === "screen-clipped" ? "Screen-clipped" : "Full cutout"}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  {segmentMode === "screen-clipped"
+                    ? "Your whole room stays visible. The mask only kicks in where the screen sits — hair/hands push through the screen there."
+                    : "Only your silhouette renders on top of the screen."}
+                </p>
+                <label className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={segmentInvert} onChange={(e) => setSegmentInvert(e.target.checked)} />
+                  Invert mask (if you disappear instead of the background)
+                </label>
+                <Slider label="Edge feather" value={featherPx} min={0} max={8} step={1} suffix="px" onChange={setFeatherPx} />
+                <label className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={faceParallax} onChange={(e) => setFaceParallax(e.target.checked)} />
+                  Head-tracked parallax (screen follows your head)
+                </label>
+                {faceParallax && (
+                  <Slider label="Parallax strength" value={parallaxStrength} min={0} max={200} step={5} suffix="px" onChange={setParallaxStrength} />
+                )}
+                <p className="text-[10px] text-muted-foreground">
+                  Head: {(headSmoothRef.current.x * 100).toFixed(0)}%, {(headSmoothRef.current.y * 100).toFixed(0)}%
+                </p>
+              </>
+            )}
+          </section>
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Layer Locks</h2>
+            <div className="grid grid-cols-2 gap-1 text-xs">
+              <button onClick={() => setScreenLocked((v) => !v)}
+                className={`rounded px-2 py-1 border ${screenLocked ? "bg-amber-500 text-black border-amber-500" : "bg-card border-border"}`}>
+                {screenLocked ? "🔒 Screen" : "🔓 Screen"}
+              </button>
+              <button onClick={() => setWebcamLocked((v) => !v)}
+                className={`rounded px-2 py-1 border ${webcamLocked ? "bg-amber-500 text-black border-amber-500" : "bg-card border-border"}`}>
+                {webcamLocked ? "🔒 Webcam" : "🔓 Webcam"}
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground leading-relaxed">
+              Locked layers ignore mouse. Also: hold <kbd className="px-1 rounded bg-muted">Alt</kbd> to click <em>through</em> the front layer and grab the one below.
+              {altHeld && <span className="text-amber-400"> · Alt held: front layer transparent to clicks</span>}
+            </p>
+          </section>
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Streaming (Kick / Twitch / YouTube)</h2>
+            <input value={streamUrl} onChange={(e) => setStreamUrl(e.target.value)}
+              placeholder="Stream URL (e.g. rtmps://…/app/)"
+              className="w-full bg-input rounded px-2 py-1 border border-border text-xs font-mono" />
+            <input value={streamKey} onChange={(e) => setStreamKey(e.target.value)}
+              type="password" placeholder="Stream Key"
+              className="w-full bg-input rounded px-2 py-1 border border-border text-xs font-mono" />
+            <div className="grid grid-cols-3 gap-1 text-[11px]">
+              <label className="flex flex-col gap-0.5">
+                <span className="text-muted-foreground">fps</span>
+                <select value={streamFps} onChange={(e) => setStreamFps(Number(e.target.value))}
+                  className="bg-input rounded px-1 py-1 border border-border">
+                  <option value={30}>30</option><option value={60}>60</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-muted-foreground">bitrate k</span>
+                <input type="number" value={streamBitrate} onChange={(e) => setStreamBitrate(Number(e.target.value))}
+                  className="bg-input rounded px-1 py-1 border border-border" />
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-muted-foreground">keyframe s</span>
+                <input type="number" value={streamKeyframe} onChange={(e) => setStreamKeyframe(Number(e.target.value))}
+                  className="bg-input rounded px-1 py-1 border border-border" />
+              </label>
+            </div>
+            <label className="flex items-center gap-2 text-[11px]">
+              <span className="text-muted-foreground">Bridge port</span>
+              <input type="number" value={bridgePort} onChange={(e) => setBridgePort(Number(e.target.value))}
+                className="w-20 bg-input rounded px-1 py-0.5 border border-border" />
+            </label>
+            <button
+              onClick={streaming ? stopStream : startStream}
+              disabled={!screenReady && !webcamReady}
+              className={`w-full text-sm rounded-md px-3 py-2 border transition disabled:opacity-40 ${
+                streaming ? "bg-destructive text-destructive-foreground border-destructive animate-pulse" : "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600"
+              }`}
+            >
+              {streaming ? "■ Stop Stream" : "● Go Live via Local Bridge"}
+            </button>
+            <button onClick={downloadBridgeScript}
+              className="w-full text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-accent">
+              ⬇ Download parallax-bridge.js (Node + ffmpeg)
+            </button>
+            {streamStatus && <p className="text-[10px] font-mono text-muted-foreground break-words">{streamStatus}</p>}
+            <details className="text-[10px] text-muted-foreground leading-relaxed">
+              <summary className="cursor-pointer text-foreground/80">How this works · local vs cloud</summary>
+              <div className="mt-1 space-y-1">
+                <p><b>Local (recommended, free):</b> browsers can't push RTMP directly. The downloaded bridge runs Node + <code>ffmpeg</code> on your machine, listens on <code>localhost:{bridgePort}</code>, and pipes this canvas straight to Kick/Twitch/YouTube. Command: <code>node parallax-bridge.js</code>.</p>
+                <p><b>Cloud fallback:</b> paste your Parallax browser URL into <a className="underline" href="https://restream.io" target="_blank" rel="noreferrer">Restream</a>'s "Add Video Source → Browser" or use <a className="underline" href="https://www.red5.net/rtmp-server/" target="_blank" rel="noreferrer">Red5</a> — they accept a browser tab and re-broadcast via RTMP to any destination.</p>
+                <p><b>Kick URL:</b> <code>rtmps://fa723fc1b171.global-contribute.live-video.net/app/</code></p>
+              </div>
+            </details>
+          </section>
+
+
+
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scene</h2>
+            <div className="grid grid-cols-4 gap-1 text-xs">
+              {(["black", "studio", "grid", "aurora"] as const).map((b) => (
+                <button key={b} onClick={() => setBgTone(b)}
+                  className={`rounded px-2 py-1 border capitalize ${bgTone === b ? "bg-accent border-primary" : "bg-card border-border"}`}>
+                  {b}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              <label className="flex-1 text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-accent text-center cursor-pointer">
+                {customBgUrl ? "Replace custom BG" : "Upload custom BG image"}
+                <input type="file" accept="image/*" className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]; if (!f) return;
+                    const r = new FileReader();
+                    r.onload = () => setCustomBgUrl(String(r.result));
+                    r.readAsDataURL(f);
+                  }} />
+              </label>
+              {customBgUrl && (
+                <button onClick={() => setCustomBgUrl(null)}
+                  className="text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-destructive hover:text-destructive-foreground">✕</button>
+              )}
+            </div>
+            <button onClick={swapOrder} className="w-full text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent">
+              Swap layer order (front: {order[1]})
+            </button>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={cinematic} onChange={(e) => setCinematic(e.target.checked)} />
+              Cinematic (glow ring + vignette)
+            </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={autoParallax} onChange={(e) => setAutoParallax(e.target.checked)} />
+              Auto parallax drift (subtle motion)
+            </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={showGuides} onChange={(e) => setShowGuides(e.target.checked)} />
+              Show safe-zone + grid guides
+            </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={snapGrid} onChange={(e) => setSnapGrid(e.target.checked)} />
+              Snap to {GRID_SIZE}px grid
+            </label>
+          </section>
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Performance</h2>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={autoQuality} onChange={(e) => setAutoQuality(e.target.checked)} />
+              Auto quality scaling
+            </label>
+            <div className="grid grid-cols-3 gap-1 text-xs">
+              {(["high", "medium", "low"] as const).map((q) => (
+                <button key={q} onClick={() => { setAutoQuality(false); setQuality(q); }}
+                  className={`rounded px-2 py-1 border capitalize ${quality === q ? "bg-accent border-primary" : "bg-card border-border"}`}>
+                  {q}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Frame budget: {quality === "high" ? "16ms" : quality === "medium" ? "22ms" : "33ms"} · shadow blur {QUALITY_SETTINGS[quality].shadowBlur}px
+            </p>
+          </section>
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Selected Layer</h2>
+              <button onClick={resetLayer} className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-accent">Reset</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(["screen", "webcam"] as LayerKey[]).map((k) => (
+                <button key={k} onClick={() => setSelected(k)}
+                  className={`text-sm rounded-md px-3 py-2 border capitalize ${selected === k ? "bg-accent border-primary" : "bg-card hover:bg-accent border-border"}`}>
+                  {k}
+                  {outOfSafe[k] && <span className="ml-1 text-amber-400" title="outside safe zone">⚠</span>}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              {(["x", "y", "w", "h"] as const).map((k) => (
+                <label key={k} className="flex flex-col gap-1">
+                  <span className="text-muted-foreground uppercase">{k}</span>
+                  <input type="number" value={Math.round(layer[k])}
+                    onChange={(e) => setField(k, Number(e.target.value))}
+                    className="bg-input rounded px-2 py-1 border border-border" />
+                </label>
+              ))}
+            </div>
+
+            <Slider label="Rotation" value={layer.rotation} min={-180} max={180} step={0.5} suffix="°" onChange={(v) => setField("rotation", v)} />
+            <Slider label="Tilt X (parallax)" value={layer.tiltX} min={-45} max={45} step={0.5} suffix="°" onChange={(v) => setField("tiltX", v)} />
+            <Slider label="Tilt Y (parallax)" value={layer.tiltY} min={-45} max={45} step={0.5} suffix="°" onChange={(v) => setField("tiltY", v)} />
+            <Slider label="Opacity" value={layer.opacity} min={0} max={1} step={0.01} onChange={(v) => setField("opacity", v)} />
+            <Slider label="Scale" value={layer.scale} min={0.2} max={3} step={0.01} onChange={(v) => setField("scale", v)} />
+          </section>
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Style</h2>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={shadow} onChange={(e) => setShadow(e.target.checked)} />
+              Drop shadow
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={rounded} onChange={(e) => setRounded(e.target.checked)} />
+              Rounded webcam
+            </label>
+            {rounded && (
+              <Slider label="Corner radius" value={roundedRadius} min={0} max={200} step={1} suffix="px" onChange={setRoundedRadius} />
+            )}
+          </section>
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scene Presets</h2>
+            <div className="flex gap-1">
+              <input value={presetName} onChange={(e) => setPresetName(e.target.value)}
+                placeholder="Name this scene"
+                className="flex-1 bg-input rounded px-2 py-1 border border-border text-xs" />
+              <button onClick={savePreset} className="text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent">Save</button>
+            </div>
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {presets.length === 0 && <p className="text-[11px] text-muted-foreground italic">No saved scenes yet</p>}
+              {presets.map((p) => (
+                <div key={p.id} className="flex items-center gap-1 group">
+                  <button onClick={() => loadPreset(p)}
+                    className="flex-1 text-left text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent truncate">
+                    {p.name}
+                  </button>
+                  <button onClick={() => deletePreset(p.id)}
+                    className="text-[10px] px-2 py-1 rounded border border-border opacity-0 group-hover:opacity-100 hover:bg-destructive hover:text-destructive-foreground">
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              <button onClick={exportPresets} disabled={!presets.length}
+                className="flex-1 text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-accent disabled:opacity-40">
+                Export JSON
+              </button>
+              <label className="flex-1 text-[11px] rounded px-2 py-1 border border-border bg-card hover:bg-accent text-center cursor-pointer">
+                Import
+                <input type="file" accept="application/json" className="hidden"
+                  onChange={(e) => e.target.files?.[0] && importPresets(e.target.files[0])} />
+              </label>
+            </div>
+            <p className="text-[10px] text-muted-foreground leading-relaxed">
+              Saved to this browser (localStorage · <code className="text-foreground/70">{PRESETS_KEY}</code>) — private to you, survives refresh, cleared if you wipe site data. Use Export JSON to back up.
+            </p>
+          </section>
+
+          <section className={`${sectionClassName} space-y-2`}>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Output</h2>
+            <button
+              onClick={recording ? stopRecording : startRecording}
+              disabled={!screenReady && !webcamReady}
+              className={`w-full text-sm rounded-md px-3 py-2 border transition disabled:opacity-50 ${
+                recording ? "bg-destructive text-destructive-foreground border-destructive animate-pulse" : "bg-card hover:bg-accent border-border"
+              }`}
+            >
+              {recording ? `■ Stop & Download (${recLabel})` : "● Start Recording"}
+            </button>
+            <p className="text-[10px] text-muted-foreground">
+              WebM VP9 · 60fps target · what you see = what encodes
+            </p>
+          </section>
+
+          <section className={`${sectionClassName} space-y-1 text-[11px] text-muted-foreground leading-relaxed`}>
+            <p>· Drag box to move · corners to resize</p>
+            <p>· Top ● handle to rotate (shift = snap 15°)</p>
+            <p>· Shift + resize locks aspect</p>
+            <p>· Arrows nudge · shift=20px · alt=1px</p>
+            <p>· [ ] rotate · Tab switches layer</p>
+          </section>
+        </aside>
+
+        <main className="flex-1 flex items-center justify-center p-6 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_48%)] min-w-0">
+          <div className="relative w-full max-w-full" style={{ aspectRatio: `${CANVAS_W}/${CANVAS_H}` }}>
+            <canvas ref={canvasRef} className="absolute inset-0 w-full h-full rounded-[28px] border border-white/10 shadow-[0_35px_120px_rgba(0,0,0,0.45)] bg-black" />
+            {showGuides && (
+              <div className="absolute inset-0 pointer-events-none">
+                <div
+                  className="absolute border border-emerald-400/40"
+                  style={{
+                    left: `${(SAFE_MARGIN / CANVAS_W) * 100}%`,
+                    top: `${(SAFE_MARGIN / CANVAS_H) * 100}%`,
+                    right: `${(SAFE_MARGIN / CANVAS_W) * 100}%`,
+                    bottom: `${(SAFE_MARGIN / CANVAS_H) * 100}%`,
+                  }}
+                />
+                <div className="absolute left-1/2 top-0 bottom-0 border-l border-white/10" />
+                <div className="absolute top-1/2 left-0 right-0 border-t border-white/10" />
+              </div>
+            )}
+            <div
+              ref={overlayRef}
+              className="absolute inset-0"
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+            >
+              {order.map((k) => (
+                <LayerHandles
+                  key={k}
+                  t={k === "screen" ? screenState : webcamState}
+                  selected={selected === k}
+                  label={k}
+                  color={k === "screen" ? "rgba(59,130,246,1)" : "rgba(236,72,153,1)"}
+                  locked={k === "screen" ? screenLocked : webcamLocked}
+                  // Alt held → topmost (last-rendered) layer becomes click-through so
+                  // you can grab the layer beneath instead of always the front one.
+                  interactive={!(altHeld && k === order[order.length - 1])}
+                  onSelect={() => setSelected(k)}
+                  onPointerDown={(e, mode, corner) => onPointerDownLayer(e, k, mode, corner)}
+                />
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+
+      <Sheet open={showCreatorTools} onOpenChange={setShowCreatorTools}>
+        <SheetContent side="right" className="w-full border-l border-white/10 bg-[#080b12]/95 p-0 text-foreground sm:max-w-xl">
+          <div className="flex h-full flex-col">
+            <SheetHeader className="border-b border-white/10 px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="rounded-2xl bg-primary/10 p-3 text-primary"><PanelsTopLeft className="h-5 w-5" /></div>
+                <div>
+                  <SheetTitle>Creator Tools Drawer</SheetTitle>
+                  <SheetDescription>Keep Parallax as the main studio and pull older recorder features in only where they improve the workflow.</SheetDescription>
+                </div>
+              </div>
+            </SheetHeader>
+
+            <div className="flex-1 space-y-5 overflow-y-auto px-6 py-6">
+              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-primary/80">Legacy Tools</p>
+                    <h3 className="mt-1 text-lg font-semibold">Use the best parts, not the whole old flow</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Teleprompter and watermark now live inside the Parallax output. The full classic recorder is still available if you want that simpler single-camera layout.</p>
+                  </div>
+                  <button
+                    onClick={() => navigate("/classic-studio")}
+                    className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm font-medium transition hover:bg-accent"
+                  >
+                    Launch Classic Studio
+                  </button>
+                </div>
+              </section>
+
+              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-primary/10 p-3 text-primary"><FileText className="h-5 w-5" /></div>
+                  <div>
+                    <h3 className="text-base font-semibold">Script Teleprompter</h3>
+                    <p className="text-sm text-muted-foreground">Edit the script with the familiar composer, then run it directly inside the scene output.</p>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button onClick={() => setShowTeleprompterEditor(true)} className="rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90">Edit Script</button>
+                  <button onClick={() => teleprompter.toggleVisible()} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">{teleprompter.state.isVisible ? "Hide Prompt" : "Show Prompt"}</button>
+                  <button onClick={handleTeleprompterReset} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Reset Scroll</button>
+                </div>
+              </section>
+
+              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-primary/10 p-3 text-primary"><ImageIcon className="h-5 w-5" /></div>
+                  <div>
+                    <h3 className="text-base font-semibold">Brand Watermark</h3>
+                    <p className="text-sm text-muted-foreground">Use the original uploader to pin a logo into the exported frame.</p>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button onClick={() => setShowLogoUploader(true)} className="rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90">Manage Logo</button>
+                  {logo.hasLogo && (
+                    <button onClick={logo.removeLogo} className="rounded-2xl border border-white/10 bg-card px-4 py-2 text-sm transition hover:bg-accent">Remove Logo</button>
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-primary/10 p-3 text-primary"><LayoutPanelTop className="h-5 w-5" /></div>
+                  <div>
+                    <h3 className="text-base font-semibold">Merged Workflow</h3>
+                    <p className="text-sm text-muted-foreground">Parallax remains the hero workspace. The drawer keeps the older tools nearby without splitting the UI into two competing studios.</p>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <TeleprompterEditor
+        isOpen={showTeleprompterEditor}
+        script={teleprompter.state.script}
+        onClose={() => setShowTeleprompterEditor(false)}
+        onSave={teleprompter.setScript}
+        onShow={teleprompter.show}
+      />
+
+      <LogoUploader
+        isOpen={showLogoUploader}
+        config={logo.config}
+        onClose={() => setShowLogoUploader(false)}
+        onUpload={logo.uploadLogo}
+        onRemove={logo.removeLogo}
+        onUpdatePosition={logo.updatePosition}
+        onUpdateSize={logo.updateSize}
+        onUpdateOpacity={logo.updateOpacity}
+      />
+    </div>
+  );
+}
+
+function Slider({
+  label, value, min, max, step, suffix, onChange,
+}: {
+  label: string; value: number; min: number; max: number; step: number; suffix?: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs">
+      <span className="flex justify-between text-muted-foreground">
+        <span>{label}</span>
+        <span className="tabular-nums text-foreground">
+          {typeof value === "number" ? value.toFixed(step < 1 ? 2 : 0) : value}
+          {suffix ?? ""}
+        </span>
+      </span>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(Number(e.target.value))} />
+    </label>
+  );
+}
+
+function LayerHandles({
+  t, selected, label, color, onSelect, onPointerDown, locked = false, interactive = true,
+}: {
+  t: Transform; selected: boolean; label: string; color: string;
+  locked?: boolean; interactive?: boolean;
+  onSelect: () => void;
+  onPointerDown: (e: React.PointerEvent, mode: "move" | "resize" | "rotate", corner?: "nw" | "ne" | "sw" | "se") => void;
+}) {
+  const w = t.w * t.scale;
+  const h = t.h * t.scale;
+  const cx = t.x + t.w / 2;
+  const cy = t.y + t.h / 2;
+  const inert = locked || !interactive;
+  const style: React.CSSProperties = {
+    position: "absolute",
+    left: `${((cx - w / 2) / CANVAS_W) * 100}%`,
+    top: `${((cy - h / 2) / CANVAS_H) * 100}%`,
+    width: `${(w / CANVAS_W) * 100}%`,
+    height: `${(h / CANVAS_H) * 100}%`,
+    border: `2px ${selected ? "solid" : "dashed"} ${color}`,
+    cursor: locked ? "not-allowed" : "move",
+    boxSizing: "border-box",
+    touchAction: "none",
+    transform: `rotate(${t.rotation}deg) skew(${t.tiltY}deg, ${t.tiltX}deg)`,
+    transformOrigin: "center center",
+    opacity: selected ? 1 : 0.55,
+    pointerEvents: inert ? "none" : "auto",
+    zIndex: selected ? 2 : 1,
+  };
+  const handle: React.CSSProperties = {
+    position: "absolute", width: 14, height: 14, background: color,
+    border: "2px solid white", borderRadius: 3, touchAction: "none",
+  };
+  return (
+    <div style={style} onPointerDown={(e) => { onSelect(); onPointerDown(e, "move"); }}>
+      <div style={{
+        position: "absolute", top: -24, left: 0, background: color, color: "white",
+        fontSize: 10, padding: "2px 6px", borderRadius: 3, fontWeight: 700, letterSpacing: 0.5,
+      }}>
+        {label.toUpperCase()} · {Math.round(t.rotation)}°
+      </div>
+      <div onPointerDown={(e) => onPointerDown(e, "rotate")}
+        style={{
+          position: "absolute", top: -34, left: "50%", transform: "translateX(-50%)",
+          width: 16, height: 16, borderRadius: "50%", background: "white",
+          border: `3px solid ${color}`, cursor: "grab", touchAction: "none",
+        }} />
+      <div style={{
+        position: "absolute", top: -18, left: "50%", width: 2, height: 18,
+        background: color, transform: "translateX(-50%)", pointerEvents: "none",
+      }} />
+      {(["nw", "ne", "sw", "se"] as const).map((c) => {
+        const pos: React.CSSProperties = {
+          ...(c.includes("n") ? { top: -7 } : { bottom: -7 }),
+          ...(c.includes("w") ? { left: -7 } : { right: -7 }),
+          cursor: c === "nw" || c === "se" ? "nwse-resize" : "nesw-resize",
+        };
+        return (
+          <div key={c} style={{ ...handle, ...pos }}
+            onPointerDown={(e) => onPointerDown(e, "resize", c)} />
+        );
+      })}
+    </div>
+  );
+}

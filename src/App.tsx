@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,6 +8,7 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+const ParallaxStudio = lazy(() => import("./pages/ParallaxStudio"));
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -15,7 +17,23 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
+          <Route
+            path="/"
+            element={
+              <Suspense fallback={<div className="min-h-screen bg-background text-foreground grid place-items-center">Loading Parallax Studio...</div>}>
+                <ParallaxStudio />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/parallax-studio"
+            element={
+              <Suspense fallback={<div className="min-h-screen bg-background text-foreground grid place-items-center">Loading Parallax Studio...</div>}>
+                <ParallaxStudio />
+              </Suspense>
+            }
+          />
+          <Route path="/classic-studio" element={<Index />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
