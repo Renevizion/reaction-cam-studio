@@ -904,7 +904,7 @@ export default function Compositor() {
       };
 
       const preferredVideo: MediaTrackConstraints = targetDeviceId
-        ? { ...baseVideo, deviceId: { ideal: targetDeviceId } }
+        ? { ...baseVideo, deviceId: { exact: targetDeviceId } }
         : baseVideo;
 
       const requestedAudio: MediaTrackConstraints | boolean = selectedMicDeviceId === "none"
@@ -922,8 +922,7 @@ export default function Compositor() {
       }
       webcamAttempts.push({ reason: "camera only", constraints: { video: preferredVideo, audio: false } });
 
-      if (targetDeviceId) {
-        webcamAttempts.push({ reason: "default camera + requested audio", constraints: { video: baseVideo, audio: requestedAudio } });
+      if (!targetDeviceId) {
         if (requestedAudio !== false) {
           webcamAttempts.push({ reason: "default camera + auto mic", constraints: { video: baseVideo, audio: true } });
         }
@@ -953,7 +952,7 @@ export default function Compositor() {
       const s = track.getSettings();
       const hasMic = stream.getAudioTracks().length > 0;
       setWebcamMeta(`${track.label || "camera"} · ${s.width ?? "?"}×${s.height ?? "?"}${hasMic ? " · mic live" : ""}`);
-      if (s.deviceId) setSelectedCameraDeviceId(s.deviceId);
+      if (!targetDeviceId && s.deviceId) setSelectedCameraDeviceId(s.deviceId);
       void refreshMediaDevices();
       track.addEventListener("ended", () => {
         setWebcamReady(false);
@@ -963,9 +962,6 @@ export default function Compositor() {
       toast.success(`Camera connected: ${track.label || "camera"}`);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "capture failed";
-      if (targetDeviceId) {
-        setSelectedCameraDeviceId("");
-      }
       setError(`Webcam: ${message}`);
       toast.error(`Camera failed: ${message}`);
     }
