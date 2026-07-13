@@ -2065,11 +2065,13 @@ http.createServer((req, res) => {
     recordedChunksRef.current = [];
     rec.ondataavailable = (e) => e.data.size > 0 && recordedChunksRef.current.push(e.data);
     rec.onstop = () => {
+      void (async () => {
       if (recordedChunksRef.current.length < 1) {
         toast.error("Recording ended without media chunks. Retry once; if it repeats, switch camera source and try again.");
         return;
       }
-      const blob = new Blob(recordedChunksRef.current, { type: rec.mimeType || recordingProfile.mimeType || "video/webm" });
+      const rawBlob = new Blob(recordedChunksRef.current, { type: rec.mimeType || recordingProfile.mimeType || "video/webm" });
+      const blob = await repairRecordingBlob(rawBlob);
       const url = URL.createObjectURL(blob);
       let thumbnail: string | undefined;
       try {
@@ -2088,6 +2090,7 @@ http.createServer((req, res) => {
       };
       addRecording(recording);
       toast.success("Recording saved to gallery");
+      })();
     };
     rec.start(1000);
     recorderRef.current = rec;
