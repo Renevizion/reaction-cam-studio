@@ -2331,7 +2331,7 @@ http.createServer((req, res) => {
         {screenMeta && <p className="text-[10px] text-muted-foreground truncate" title={screenMeta}>{screenMeta}{screenPaused && " · PAUSED"}</p>}
         <div className="flex gap-1">
           <button
-            onClick={webcamReady ? stopWebcam : startWebcam}
+            onClick={() => (webcamReady ? stopWebcam() : startWebcam())}
             disabled={startingWebcam}
             className={`flex-1 text-sm rounded-md px-3 py-2 border transition disabled:opacity-50 ${
               webcamReady ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
