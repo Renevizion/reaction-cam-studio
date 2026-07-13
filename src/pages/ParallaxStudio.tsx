@@ -1,1 +1,1 @@
-export { default } from "@/components/ScriptCamStudio";
+export { default } from "@/components/ParallaxStudio";
