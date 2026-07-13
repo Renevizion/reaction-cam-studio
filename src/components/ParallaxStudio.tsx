@@ -3532,6 +3532,8 @@ http.createServer((req, res) => {
         <VideoPlayerModal
           recording={playingRecording}
           onClose={() => setPlayingRecording(null)}
+          onDownload={downloadRecording}
+          onShare={shareRecording}
         />
       </Suspense>
     </div>
