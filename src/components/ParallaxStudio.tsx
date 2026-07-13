@@ -9,6 +9,7 @@ import { useOverlays } from "@/hooks/useOverlays";
 import { useRecordings } from "@/hooks/useRecordings";
 import { useTeleprompter } from "@/hooks/useTeleprompter";
 import { defaultLocalCaptureConfig, generateLocalCaptureFiles, generateLocalCaptureSetup, type LocalCaptureConfig } from "@/lib/localCaptureKit";
+import { getSupportedPlayableMimeType, repairRecordingBlob } from "@/lib/recordingMedia";
 import { toast } from "sonner";
 import type { Recording } from "@/hooks/useRecorder";
 
@@ -105,16 +106,6 @@ const estimateVideoBitrate = (
   return clamp(target, 6_000_000, 30_000_000);
 };
 
-const canPlaybackMimeType = (type: string) => {
-  const probe = document.createElement("video");
-  if (probe.canPlayType(type)) return true;
-  const baseType = type.split(";")[0] ?? type;
-  return !!probe.canPlayType(baseType);
-};
-
-const getPreferredRecorderMimeType = (candidates: string[]) =>
-  candidates.find((type) => MediaRecorder.isTypeSupported(type) && canPlaybackMimeType(type));
-
 const formatUserMediaError = (error: unknown, sourceLabel: string) => {
   if (error instanceof DOMException) {
     if (error.name === "NotAllowedError") {
@@ -139,11 +130,7 @@ const formatUserMediaError = (error: unknown, sourceLabel: string) => {
 const getRecordingProfile = (width: number, height: number, fps: number, preset: RecordingQualityPreset) => {
   const videoBitsPerSecond = estimateVideoBitrate(width, height, fps, preset);
   const audioBitsPerSecond = 320_000;
-  const mimeType = getPreferredRecorderMimeType([
-    "video/webm;codecs=vp8,opus",
-    "video/webm;codecs=vp9,opus",
-    "video/webm",
-  ]);
+  const mimeType = getSupportedPlayableMimeType();
 
   return {
     width,

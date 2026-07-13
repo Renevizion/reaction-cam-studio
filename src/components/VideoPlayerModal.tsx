@@ -18,7 +18,7 @@ interface VideoPlayerModalProps {
  *    so React mounts a fresh <video> per recording and lets the browser
  *    handle everything else.
  */
-export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
+const VideoPlayerModalComponent: React.FC<VideoPlayerModalProps> = ({
   recording,
   onClose,
   onDownload,
@@ -135,3 +135,11 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     ? createPortal(modal, document.body)
     : modal;
 };
+
+export const VideoPlayerModal = React.memo(VideoPlayerModalComponent, (prev, next) => (
+  prev.recording?.id === next.recording?.id
+  && prev.recording?.url === next.recording?.url
+  && prev.onClose === next.onClose
+  && prev.onDownload === next.onDownload
+  && prev.onShare === next.onShare
+));
