@@ -2951,7 +2951,7 @@ http.createServer((req, res) => {
                           <p className="mt-2 font-semibold text-foreground">Share screen</p>
                           <p className="mt-1 text-xs text-muted-foreground">Bring the app or tab onto the canvas.</p>
                         </button>
-                        <button onClick={startWebcam} className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-3 text-left transition hover:bg-white/[0.06]">
+                        <button onClick={() => startWebcam()} className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-3 text-left transition hover:bg-white/[0.06]">
                           <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Step 2</p>
                           <p className="mt-2 font-semibold text-foreground">Start camera</p>
                           <p className="mt-1 text-xs text-muted-foreground">Layer yourself into frame with the default capture path.</p>
