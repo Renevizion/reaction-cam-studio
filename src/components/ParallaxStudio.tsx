@@ -2596,7 +2596,7 @@ http.createServer((req, res) => {
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scene Presets</h2>
         <div className="flex gap-1">
           <input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder="Name this scene" className="flex-1 bg-input rounded px-2 py-1 border border-border text-xs" />
-          <button onClick={savePreset} className="text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent">Save</button>
+          <button onClick={() => savePreset()} className="text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent">Save</button>
         </div>
         <div className="space-y-1 max-h-48 overflow-y-auto">
           {presets.length === 0 && <p className="text-[11px] text-muted-foreground italic">No saved scenes yet</p>}
