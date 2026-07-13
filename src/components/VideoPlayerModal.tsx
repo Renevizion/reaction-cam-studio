@@ -1,84 +1,125 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { X, Download, Share2 } from 'lucide-react';
 import { Recording } from '@/hooks/useRecorder';
 
 interface VideoPlayerModalProps {
   recording: Recording | null;
   onClose: () => void;
+  onDownload?: (recording: Recording) => void;
+  onShare?: (recording: Recording) => void;
 }
 
+/**
+ * iOS-native-style playback: a single <video> element with the browser's
+ * built-in controls. No overlays on top of the video (they were blocking
+ * the timeline/controls and causing the darker flicker on pause/play).
+ */
 export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   recording,
   onClose,
+  onDownload,
+  onShare,
 }) => {
-  const [videoReady, setVideoReady] = useState(false);
-  const [pausedFrame, setPausedFrame] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [errored, setErrored] = useState(false);
 
-  const captureVideoFrame = () => {
-    const video = videoRef.current;
-    if (!video || video.videoWidth < 2 || video.videoHeight < 2) return null;
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    try {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL('image/jpeg', 0.82);
-    } catch {
-      return null;
-    }
-  };
-
+  // Reset error state whenever we swap recordings.
   useEffect(() => {
-    setVideoReady(false);
-    setPausedFrame(null);
+    setErrored(false);
   }, [recording?.id]);
+
+  // Escape key closes on desktop.
+  useEffect(() => {
+    if (!recording) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [recording, onClose]);
 
   if (!recording) return null;
 
-  return (
-    <div className="fixed inset-0 z-[60] bg-black flex items-center justify-center">
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 safe-area-top w-10 h-10 rounded-full glass flex items-center justify-center z-10"
-      >
-        <X className="w-5 h-5" />
-      </button>
+  const canShare = typeof navigator !== 'undefined'
+    && 'canShare' in navigator
+    && !!onShare;
 
-      {!videoReady && (
-        <div
-          className="absolute inset-0 bg-black bg-center bg-cover"
-          style={recording.thumbnail ? { backgroundImage: `url(${recording.thumbnail})` } : undefined}
+  return (
+    <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+      {/* Top action bar — sits above the video, never over its controls */}
+      <div
+        className="flex items-center justify-between px-3 py-2 bg-black/80 backdrop-blur-md"
+        style={{ paddingTop: 'max(env(safe-area-inset-top), 0.5rem)' }}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close player"
+          className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/30 flex items-center justify-center text-white transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+        <div className="flex items-center gap-2">
+          {canShare && (
+            <button
+              onClick={() => onShare?.(recording)}
+              aria-label="Share recording"
+              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/30 flex items-center justify-center text-white transition-colors"
+            >
+              <Share2 className="w-5 h-5" />
+            </button>
+          )}
+          {onDownload && (
+            <button
+              onClick={() => onDownload(recording)}
+              aria-label="Download recording"
+              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/30 flex items-center justify-center text-white transition-colors"
+            >
+              <Download className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Video area — flex-1 so native controls sit right above the safe area */}
+      <div className="flex-1 min-h-0 flex items-center justify-center bg-black">
+        <video
+          ref={videoRef}
+          key={recording.id}
+          src={recording.url}
+          poster={recording.thumbnail}
+          className="w-full h-full object-contain bg-black"
+          controls
+          autoPlay
+          playsInline
+          // Use metadata preload so iOS Safari renders the first frame quickly
+          // without buffering the entire clip (which caused stalls/flicker).
+          preload="metadata"
+          controlsList="nodownload noremoteplayback"
+          onError={() => {
+            setErrored(true);
+            console.error('Playback failed for recording', recording.id, recording.blob?.type);
+          }}
         />
+      </div>
+
+      {errored && (
+        <div className="absolute inset-0 flex items-center justify-center p-6 pointer-events-none">
+          <div className="pointer-events-auto max-w-xs text-center bg-black/80 border border-white/10 rounded-2xl p-5 text-white">
+            <p className="font-semibold mb-1">Can't play this file here</p>
+            <p className="text-sm text-white/70 mb-4">
+              Download it and open in your Photos or Files app — it will play natively.
+            </p>
+            {onDownload && (
+              <button
+                onClick={() => onDownload(recording)}
+                className="w-full py-2 rounded-xl bg-white text-black font-medium"
+              >
+                Download
+              </button>
+            )}
+          </div>
+        </div>
       )}
-      {pausedFrame && (
-        <div
-          className="absolute inset-0 bg-black bg-center bg-contain bg-no-repeat"
-          style={{ backgroundImage: `url(${pausedFrame})` }}
-        />
-      )}
-      <video
-        ref={videoRef}
-        key={recording.id}
-        src={recording.url}
-        poster={recording.thumbnail}
-        className="w-full h-full object-contain bg-black"
-        controls
-        autoPlay
-        playsInline
-        preload="auto"
-        onLoadedData={() => setVideoReady(true)}
-        onPlay={() => setPausedFrame(null)}
-        onPause={() => {
-          const captured = captureVideoFrame();
-          if (captured) setPausedFrame(captured);
-        }}
-        onError={() => {
-          console.error('Playback failed for recording', recording.id, recording.blob.type);
-        }}
-      />
     </div>
   );
 };
