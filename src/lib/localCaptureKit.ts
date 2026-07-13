@@ -43,14 +43,14 @@ export const defaultLocalCaptureConfig: LocalCaptureConfig = {
   preset: "veryfast",
 };
 
-const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+const shellQuote = (value: string) => `'${value.split("'").join("'\\''")}'`;
 
 const htmlEscape = (value: string | number) =>
   String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+    .split("&").join("&amp;")
+    .split("<").join("&lt;")
+    .split(">").join("&gt;")
+    .split('"').join("&quot;");
 
 function configBlock(config: LocalCaptureConfig) {
   return `VIDEO_INDEX=${config.videoIndex}
