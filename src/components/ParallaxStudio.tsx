@@ -1902,7 +1902,7 @@ export default function Compositor() {
     if (!canvas) { setStreamStatus("Canvas not ready"); return; }
     const stream = canvas.captureStream(streamFps);
     appendMixedAudioTracks(stream);
-    const mime = getPreferredRecorderMimeType(["video/webm;codecs=vp8,opus", "video/webm"]);
+    const mime = getSupportedPlayableMimeType(["video/webm;codecs=vp8,opus", "video/webm"]);
     let rec: MediaRecorder;
     try {
       rec = new MediaRecorder(stream, {
