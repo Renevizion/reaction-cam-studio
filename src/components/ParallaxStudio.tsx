@@ -2331,7 +2331,7 @@ http.createServer((req, res) => {
         {screenMeta && <p className="text-[10px] text-muted-foreground truncate" title={screenMeta}>{screenMeta}{screenPaused && " · PAUSED"}</p>}
         <div className="flex gap-1">
           <button
-            onClick={webcamReady ? stopWebcam : startWebcam}
+            onClick={() => (webcamReady ? stopWebcam() : startWebcam())}
             disabled={startingWebcam}
             className={`flex-1 text-sm rounded-md px-3 py-2 border transition disabled:opacity-50 ${
               webcamReady ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent border-border"
@@ -2596,7 +2596,7 @@ http.createServer((req, res) => {
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scene Presets</h2>
         <div className="flex gap-1">
           <input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder="Name this scene" className="flex-1 bg-input rounded px-2 py-1 border border-border text-xs" />
-          <button onClick={savePreset} className="text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent">Save</button>
+          <button onClick={() => savePreset()} className="text-xs rounded px-2 py-1 border border-border bg-card hover:bg-accent">Save</button>
         </div>
         <div className="space-y-1 max-h-48 overflow-y-auto">
           {presets.length === 0 && <p className="text-[11px] text-muted-foreground italic">No saved scenes yet</p>}
@@ -2777,7 +2777,7 @@ http.createServer((req, res) => {
                       <p className="mt-1 text-xs opacity-75">{screenMeta || "Bring your app, browser, or desktop into the scene."}</p>
                     </button>
                     <button
-                      onClick={webcamReady ? stopWebcam : startWebcam}
+                      onClick={() => (webcamReady ? stopWebcam() : startWebcam())}
                       disabled={startingWebcam}
                       className={`rounded-[24px] border px-4 py-4 text-left transition disabled:opacity-50 ${webcamReady ? "border-primary bg-primary text-primary-foreground shadow-[0_18px_50px_rgba(220,38,38,0.35)]" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
                     >
@@ -2904,7 +2904,7 @@ http.createServer((req, res) => {
                             placeholder="Save current scene"
                             className="flex-1 rounded-full border border-white/10 bg-black/25 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70"
                           />
-                          <button onClick={savePreset} className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/[0.16]">Save</button>
+                          <button onClick={() => savePreset()} className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/[0.16]">Save</button>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           {presets.slice(0, 4).map((preset) => (
@@ -2951,7 +2951,7 @@ http.createServer((req, res) => {
                           <p className="mt-2 font-semibold text-foreground">Share screen</p>
                           <p className="mt-1 text-xs text-muted-foreground">Bring the app or tab onto the canvas.</p>
                         </button>
-                        <button onClick={startWebcam} className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-3 text-left transition hover:bg-white/[0.06]">
+                        <button onClick={() => startWebcam()} className="rounded-[22px] border border-white/10 bg-black/25 px-4 py-3 text-left transition hover:bg-white/[0.06]">
                           <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Step 2</p>
                           <p className="mt-2 font-semibold text-foreground">Start camera</p>
                           <p className="mt-1 text-xs text-muted-foreground">Layer yourself into frame with the default capture path.</p>
@@ -3149,7 +3149,7 @@ http.createServer((req, res) => {
               {screenReady ? "Screen On" : "Share Screen"}
             </button>
             <button
-              onClick={webcamReady ? stopWebcam : startWebcam}
+              onClick={() => (webcamReady ? stopWebcam() : startWebcam())}
               disabled={startingWebcam}
               className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${webcamReady ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
             >
@@ -3532,6 +3532,8 @@ http.createServer((req, res) => {
         <VideoPlayerModal
           recording={playingRecording}
           onClose={() => setPlayingRecording(null)}
+          onDownload={downloadRecording}
+          onShare={shareRecording}
         />
       </Suspense>
     </div>
