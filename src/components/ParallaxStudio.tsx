@@ -3149,7 +3149,7 @@ http.createServer((req, res) => {
               {screenReady ? "Screen On" : "Share Screen"}
             </button>
             <button
-              onClick={webcamReady ? stopWebcam : startWebcam}
+              onClick={() => (webcamReady ? stopWebcam() : startWebcam())}
               disabled={startingWebcam}
               className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${webcamReady ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/15 bg-black/35 text-white hover:bg-white/[0.10]"}`}
             >
