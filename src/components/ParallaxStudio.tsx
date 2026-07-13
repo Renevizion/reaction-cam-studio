@@ -2904,7 +2904,7 @@ http.createServer((req, res) => {
                             placeholder="Save current scene"
                             className="flex-1 rounded-full border border-white/10 bg-black/25 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70"
                           />
-                          <button onClick={savePreset} className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/[0.16]">Save</button>
+                          <button onClick={() => savePreset()} className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/[0.16]">Save</button>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           {presets.slice(0, 4).map((preset) => (
