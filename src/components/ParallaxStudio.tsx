@@ -3519,19 +3519,16 @@ http.createServer((req, res) => {
         <RecordingsGallery
           isOpen={showGallery}
           recordings={recordings}
-          onClose={() => setShowGallery(false)}
-          onPlay={(recording) => setPlayingRecording(recording)}
+          onClose={handleCloseGallery}
+          onPlay={handlePlayRecording}
           onDelete={deleteRecording}
           onDownload={downloadRecording}
-          onShare={async (recording) => {
-            const ok = await shareRecording(recording);
-            if (!ok) toast.success("Downloaded — upload it where you want");
-          }}
+          onShare={handleShareRecording}
         />
 
         <VideoPlayerModal
           recording={playingRecording}
-          onClose={() => setPlayingRecording(null)}
+          onClose={handleClosePlayer}
           onDownload={downloadRecording}
           onShare={shareRecording}
         />
