@@ -429,6 +429,13 @@ export default function Compositor() {
   const [showGallery, setShowGallery] = useState(false);
   const [showSoundEffects, setShowSoundEffects] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
+  const handleCloseGallery = useCallback(() => setShowGallery(false), []);
+  const handlePlayRecording = useCallback((r: Recording) => setPlayingRecording(r), []);
+  const handleClosePlayer = useCallback(() => setPlayingRecording(null), []);
+  const handleShareRecording = useCallback(async (r: Recording) => {
+    const ok = await shareRecording(r);
+    if (!ok) toast.success("Downloaded — upload it where you want");
+  }, [shareRecording]);
   const [showPrepPanel, setShowPrepPanel] = useState(false);
   const [showDockPresets, setShowDockPresets] = useState(false);
   const [captureConfig, setCaptureConfig] = useState<LocalCaptureConfig>(() => {
@@ -3519,19 +3526,16 @@ http.createServer((req, res) => {
         <RecordingsGallery
           isOpen={showGallery}
           recordings={recordings}
-          onClose={() => setShowGallery(false)}
-          onPlay={(recording) => setPlayingRecording(recording)}
+          onClose={handleCloseGallery}
+          onPlay={handlePlayRecording}
           onDelete={deleteRecording}
           onDownload={downloadRecording}
-          onShare={async (recording) => {
-            const ok = await shareRecording(recording);
-            if (!ok) toast.success("Downloaded — upload it where you want");
-          }}
+          onShare={handleShareRecording}
         />
 
         <VideoPlayerModal
           recording={playingRecording}
-          onClose={() => setPlayingRecording(null)}
+          onClose={handleClosePlayer}
           onDownload={downloadRecording}
           onShare={shareRecording}
         />
