@@ -429,6 +429,13 @@ export default function Compositor() {
   const [showGallery, setShowGallery] = useState(false);
   const [showSoundEffects, setShowSoundEffects] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
+  const handleCloseGallery = useCallback(() => setShowGallery(false), []);
+  const handlePlayRecording = useCallback((r: Recording) => setPlayingRecording(r), []);
+  const handleClosePlayer = useCallback(() => setPlayingRecording(null), []);
+  const handleShareRecording = useCallback(async (r: Recording) => {
+    const ok = await shareRecording(r);
+    if (!ok) toast.success("Downloaded — upload it where you want");
+  }, [shareRecording]);
   const [showPrepPanel, setShowPrepPanel] = useState(false);
   const [showDockPresets, setShowDockPresets] = useState(false);
   const [captureConfig, setCaptureConfig] = useState<LocalCaptureConfig>(() => {
