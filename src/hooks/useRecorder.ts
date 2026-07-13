@@ -1,5 +1,6 @@
 /* @refresh reset */
 import { useState, useRef, useCallback } from 'react';
+import { getSupportedPlayableMimeType, repairRecordingBlob } from '@/lib/recordingMedia';
 
 export interface Recording {
   id: string;
@@ -59,17 +60,7 @@ export function useRecorder(): UseRecorderReturn {
   const startTimeRef = useRef<number>(0);
   const recordingStreamRef = useRef<MediaStream | null>(null);
 
-  const getSupportedMimeType = useCallback(() => {
-    const candidates = [
-      'video/mp4;codecs=h264,aac',
-      'video/mp4',
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=vp8,opus',
-      'video/webm',
-    ];
-
-    return candidates.find((type) => MediaRecorder.isTypeSupported(type));
-  }, []);
+  const getSupportedMimeType = useCallback(() => getSupportedPlayableMimeType(), []);
 
   const startCameraRecording = useCallback(async (cameraStream: MediaStream, mode: RecordingMode) => {
     try {
@@ -150,6 +141,7 @@ export function useRecorder(): UseRecorderReturn {
       const currentDuration = duration;
 
       mediaRecorderRef.current.onstop = () => {
+        void (async () => {
         if (recordingStreamRef.current) {
           recordingStreamRef.current.getTracks().forEach((track) => track.stop());
           recordingStreamRef.current = null;
@@ -160,7 +152,8 @@ export function useRecorder(): UseRecorderReturn {
           mediaRecorderRef.current?.mimeType ||
           'video/webm';
 
-        const blob = new Blob(chunksRef.current, { type: blobType });
+        const rawBlob = new Blob(chunksRef.current, { type: blobType });
+        const blob = await repairRecordingBlob(rawBlob);
         const url = URL.createObjectURL(blob);
         
         const recording: Recording = {
@@ -175,6 +168,7 @@ export function useRecorder(): UseRecorderReturn {
         setIsPaused(false);
         setRecordingMode(null);
         resolve(recording);
+        })();
       };
 
       if (mediaRecorderRef.current.state !== 'inactive') {

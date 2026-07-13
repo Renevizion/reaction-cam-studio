@@ -1,5 +1,6 @@
 // IndexedDB-backed recording persistence so recordings survive refresh.
 import { Recording } from './useRecorder';
+import { repairRecordingBlob } from '@/lib/recordingMedia';
 
 const DB_NAME = 'scriptcam';
 const STORE = 'recordings';
@@ -56,17 +57,21 @@ export async function loadRecordings(): Promise<Recording[]> {
       const req = store.getAll();
       req.onsuccess = () => {
         const items = (req.result as StoredRecording[]) || [];
-        const recs = items
+        void Promise.all(items
           .sort((a, b) => b.createdAt - a.createdAt)
-          .map<Recording>((s) => ({
-            id: s.id,
-            blob: s.blob,
-            url: URL.createObjectURL(s.blob),
-            duration: s.duration,
-            createdAt: new Date(s.createdAt),
-            thumbnail: s.thumbnail,
-          }));
-        resolve(recs);
+          .map<Promise<Recording>>(async (s) => {
+            const blob = await repairRecordingBlob(s.blob);
+            return {
+              id: s.id,
+              blob,
+              url: URL.createObjectURL(blob),
+              duration: s.duration,
+              createdAt: new Date(s.createdAt),
+              thumbnail: s.thumbnail,
+            };
+          }))
+          .then(resolve)
+          .catch(reject);
       };
       req.onerror = () => reject(req.error);
     });
