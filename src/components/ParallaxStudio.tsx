@@ -2777,7 +2777,7 @@ http.createServer((req, res) => {
                       <p className="mt-1 text-xs opacity-75">{screenMeta || "Bring your app, browser, or desktop into the scene."}</p>
                     </button>
                     <button
-                      onClick={webcamReady ? stopWebcam : startWebcam}
+                      onClick={() => (webcamReady ? stopWebcam() : startWebcam())}
                       disabled={startingWebcam}
                       className={`rounded-[24px] border px-4 py-4 text-left transition disabled:opacity-50 ${webcamReady ? "border-primary bg-primary text-primary-foreground shadow-[0_18px_50px_rgba(220,38,38,0.35)]" : "border-white/10 bg-black/25 hover:bg-white/[0.06]"}`}
                     >
