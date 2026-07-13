@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, memo } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Download, Share2 } from 'lucide-react';
 import { Recording } from '@/hooks/useRecorder';
 
@@ -10,11 +11,17 @@ interface VideoPlayerModalProps {
 }
 
 /**
- * iOS-native-style playback: a single <video> element with the browser's
- * built-in controls. No overlays on top of the video (they were blocking
- * the timeline/controls and causing the darker flicker on pause/play).
+ * Loom/Streamyard-style playback:
+ *  - Native <video controls playsInline> — never covered by overlays.
+ *  - Portaled to <body> so re-renders of the studio tree above don't
+ *    reconcile the <video> element (that was the root cause of the flicker).
+ *  - No poster/thumbnail overlay — iOS Safari flashes the poster on every
+ *    buffer/pause; dropping it removes the darker flicker.
+ *  - preload="auto" for smooth scrubbing on the native timeline.
+ *  - Memoized on recording.id so identical props from a busy parent don't
+ *    force a video reload.
  */
-export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
+const VideoPlayerModalImpl: React.FC<VideoPlayerModalProps> = ({
   recording,
   onClose,
   onDownload,
@@ -23,12 +30,10 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [errored, setErrored] = useState(false);
 
-  // Reset error state whenever we swap recordings.
   useEffect(() => {
     setErrored(false);
   }, [recording?.id]);
 
-  // Escape key closes on desktop.
   useEffect(() => {
     if (!recording) return;
     const onKey = (e: KeyboardEvent) => {
@@ -38,15 +43,26 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [recording, onClose]);
 
+  // Pause + release the element on close so iOS doesn't keep the decoder hot.
+  useEffect(() => {
+    return () => {
+      const v = videoRef.current;
+      if (v) {
+        try { v.pause(); } catch {}
+        v.removeAttribute('src');
+        try { v.load(); } catch {}
+      }
+    };
+  }, [recording?.id]);
+
   if (!recording) return null;
 
   const canShare = typeof navigator !== 'undefined'
     && 'canShare' in navigator
     && !!onShare;
 
-  return (
+  const modal = (
     <div className="fixed inset-0 z-[60] bg-black flex flex-col">
-      {/* Top action bar — sits above the video, never over its controls */}
       <div
         className="flex items-center justify-between px-3 py-2 bg-black/80 backdrop-blur-md"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 0.5rem)' }}
@@ -80,21 +96,18 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         </div>
       </div>
 
-      {/* Video area — flex-1 so native controls sit right above the safe area */}
       <div className="flex-1 min-h-0 flex items-center justify-center bg-black">
         <video
           ref={videoRef}
           key={recording.id}
           src={recording.url}
-          poster={recording.thumbnail}
           className="w-full h-full object-contain bg-black"
           controls
           autoPlay
           playsInline
-          // Use metadata preload so iOS Safari renders the first frame quickly
-          // without buffering the entire clip (which caused stalls/flicker).
-          preload="metadata"
+          preload="auto"
           controlsList="nodownload noremoteplayback"
+          disablePictureInPicture
           onError={() => {
             setErrored(true);
             console.error('Playback failed for recording', recording.id, recording.blob?.type);
@@ -122,4 +135,19 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
       )}
     </div>
   );
+
+  return typeof document !== 'undefined'
+    ? createPortal(modal, document.body)
+    : modal;
 };
+
+export const VideoPlayerModal = memo(VideoPlayerModalImpl, (prev, next) => {
+  // Only re-render when the active recording actually changes.
+  return (
+    prev.recording?.id === next.recording?.id &&
+    prev.recording?.url === next.recording?.url &&
+    prev.onClose === next.onClose &&
+    prev.onDownload === next.onDownload &&
+    prev.onShare === next.onShare
+  );
+});
