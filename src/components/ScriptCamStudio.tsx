@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { Camera, Download, FolderOpen, Mic, Pause, Play, RefreshCw, Square, Video } from 'lucide-react';
+import { Camera, Download, FlipHorizontal, FolderOpen, Mic, Pause, Play, RefreshCw, Square, Timer, Video } from 'lucide-react';
 import { toast } from 'sonner';
+import { AudioLevelMeter } from '@/components/AudioLevelMeter';
+import { CountdownOverlay } from '@/components/CountdownOverlay';
 import { RecordingsGallery } from '@/components/RecordingsGallery';
 import { TeleprompterEditor } from '@/components/TeleprompterEditor';
 import { TeleprompterOverlay } from '@/components/TeleprompterOverlay';
 import { VideoPlayerModal } from '@/components/VideoPlayerModal';
+import { useCountdown } from '@/hooks/useCountdown';
 import { useRecorder } from '@/hooks/useRecorder';
 import { useRecordings } from '@/hooks/useRecordings';
 import { useTeleprompter } from '@/hooks/useTeleprompter';
@@ -46,9 +49,13 @@ export default function ScriptCamStudio() {
   const [selectedMicId, setSelectedMicId] = useState(() => localStorage.getItem(MIC_DEVICE_KEY) || '');
   const [activeCameraLabel, setActiveCameraLabel] = useState('');
   const [activeMicLabel, setActiveMicLabel] = useState('');
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [countdownEnabled, setCountdownEnabled] = useState(true);
   const [isTeleprompterOpen, setIsTeleprompterOpen] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
+
+  const countdown = useCountdown(3);
 
   const teleprompter = useTeleprompter();
   const recorder = useRecorder();
@@ -135,7 +142,7 @@ export default function ScriptCamStudio() {
     };
   }, []);
 
-  const startCamera = useCallback(async (cameraId = selectedCameraId, micId = selectedMicId) => {
+  const startCamera = useCallback(async (cameraId = selectedCameraId, micId = selectedMicId, facing: 'user' | 'environment' = facingMode) => {
     if (isStartingCamera) return streamRef.current;
     setIsStartingCamera(true);
     setError(null);
@@ -148,11 +155,11 @@ export default function ScriptCamStudio() {
 
     const preferredVideo: MediaTrackConstraints = cameraId
       ? { ...baseVideo, deviceId: { exact: cameraId } }
-      : { ...baseVideo, facingMode: { ideal: 'user' } };
+      : { ...baseVideo, facingMode: { ideal: facing } };
 
     const softVideo: MediaTrackConstraints = cameraId
       ? { ...baseVideo, deviceId: { ideal: cameraId } }
-      : baseVideo;
+      : { ...baseVideo, facingMode: facing };
 
     const preferredAudio = buildAudioConstraints(micId);
     const attempts: MediaStreamConstraints[] = [
@@ -200,7 +207,16 @@ export default function ScriptCamStudio() {
     } finally {
       setIsStartingCamera(false);
     }
-  }, [buildAudioConstraints, isStartingCamera, refreshDevices, selectedCameraId, selectedMicId]);
+  }, [buildAudioConstraints, facingMode, isStartingCamera, refreshDevices, selectedCameraId, selectedMicId]);
+
+  const handleFlipCamera = useCallback(async () => {
+    if (recorder.isRecording) return;
+    const next = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(next);
+    // Clear device ID so facingMode is honored
+    setSelectedCameraId('');
+    await startCamera('', selectedMicId, next);
+  }, [facingMode, recorder.isRecording, selectedMicId, startCamera]);
 
   const handleCameraSelect = useCallback(async (event: ChangeEvent<HTMLSelectElement>) => {
     const nextId = event.target.value;
@@ -216,6 +232,19 @@ export default function ScriptCamStudio() {
     await startCamera(selectedCameraId, nextId);
   }, [isCameraActive, recorder.isRecording, selectedCameraId, startCamera]);
 
+  const beginRecording = useCallback(async () => {
+    const activeStream = streamRef.current ?? await startCamera();
+    if (!activeStream) return;
+    try {
+      await recorder.startVideoRecording(activeStream);
+      toast.success('Recording started');
+    } catch (recordError) {
+      const message = recordError instanceof Error ? recordError.message : 'Recording could not start.';
+      setError(message);
+      toast.error(message);
+    }
+  }, [recorder, startCamera]);
+
   const handleRecord = useCallback(async () => {
     if (recorder.isRecording) {
       const recording = await recorder.stopRecording();
@@ -226,19 +255,16 @@ export default function ScriptCamStudio() {
       }
       return;
     }
-
-    const activeStream = streamRef.current ?? await startCamera();
-    if (!activeStream) return;
-
-    try {
-      await recorder.startVideoRecording(activeStream);
-      toast.success('Recording started');
-    } catch (recordError) {
-      const message = recordError instanceof Error ? recordError.message : 'Recording could not start.';
-      setError(message);
-      toast.error(message);
+    if (countdown.isCountingDown) {
+      countdown.cancelCountdown();
+      return;
     }
-  }, [addRecording, recorder, startCamera]);
+    if (countdownEnabled) {
+      countdown.startCountdown(() => { void beginRecording(); });
+    } else {
+      await beginRecording();
+    }
+  }, [addRecording, beginRecording, countdown, countdownEnabled, recorder]);
 
   const handleShareRecording = useCallback(async (recording: Recording) => {
     const shared = await shareRecording(recording);
@@ -295,6 +321,7 @@ export default function ScriptCamStudio() {
             <p className="mt-1 max-w-[70vw] truncate text-xs text-muted-foreground">{cameraMeta}</p>
           </div>
           <div className="flex items-center gap-2">
+            <AudioLevelMeter stream={stream} isRecording={isCameraActive} />
             <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ${recorder.isRecording ? 'bg-destructive text-destructive-foreground' : 'bg-secondary text-secondary-foreground'}`}>
               {cameraStatus}
             </span>
@@ -308,6 +335,8 @@ export default function ScriptCamStudio() {
           </div>
         </div>
       </header>
+
+      <CountdownOverlay count={countdown.count} />
 
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 p-3" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.75rem)' }}>
         <div className="pointer-events-auto mx-auto max-w-6xl rounded-md border border-border bg-background/85 p-3 shadow-2xl backdrop-blur-xl">
@@ -359,12 +388,32 @@ export default function ScriptCamStudio() {
             </button>
 
             <button
+              onClick={handleFlipCamera}
+              disabled={recorder.isRecording || isStartingCamera || !isCameraActive}
+              title="Flip camera (front/back)"
+              className="inline-flex h-11 items-center gap-2 rounded-md border border-border bg-card px-4 text-sm font-semibold transition hover:bg-accent hover:text-accent-foreground disabled:opacity-40"
+            >
+              <FlipHorizontal className="h-4 w-4" />
+              Flip
+            </button>
+
+            <button
+              onClick={() => setCountdownEnabled((v) => !v)}
+              title="Toggle 3-2-1 countdown before recording"
+              aria-pressed={countdownEnabled}
+              className={`inline-flex h-11 items-center gap-2 rounded-md border px-4 text-sm font-semibold transition ${countdownEnabled ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-card hover:bg-accent hover:text-accent-foreground'}`}
+            >
+              <Timer className="h-4 w-4" />
+              3·2·1
+            </button>
+
+            <button
               onClick={handleRecord}
               disabled={isStartingCamera}
               className={`inline-flex h-12 min-w-[8.75rem] items-center justify-center gap-2 rounded-md px-5 text-sm font-bold transition disabled:opacity-50 ${recorder.isRecording ? 'bg-destructive text-destructive-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
             >
               {recorder.isRecording ? <Square className="h-4 w-4 fill-current" /> : <Video className="h-4 w-4" />}
-              {recorder.isRecording ? 'Stop' : 'Record'}
+              {recorder.isRecording ? 'Stop' : countdown.isCountingDown ? `In ${countdown.count ?? ''}…` : 'Record'}
             </button>
 
             <button
