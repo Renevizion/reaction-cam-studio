@@ -232,6 +232,19 @@ export default function ScriptCamStudio() {
     await startCamera(selectedCameraId, nextId);
   }, [isCameraActive, recorder.isRecording, selectedCameraId, startCamera]);
 
+  const beginRecording = useCallback(async () => {
+    const activeStream = streamRef.current ?? await startCamera();
+    if (!activeStream) return;
+    try {
+      await recorder.startVideoRecording(activeStream);
+      toast.success('Recording started');
+    } catch (recordError) {
+      const message = recordError instanceof Error ? recordError.message : 'Recording could not start.';
+      setError(message);
+      toast.error(message);
+    }
+  }, [recorder, startCamera]);
+
   const handleRecord = useCallback(async () => {
     if (recorder.isRecording) {
       const recording = await recorder.stopRecording();
@@ -242,19 +255,16 @@ export default function ScriptCamStudio() {
       }
       return;
     }
-
-    const activeStream = streamRef.current ?? await startCamera();
-    if (!activeStream) return;
-
-    try {
-      await recorder.startVideoRecording(activeStream);
-      toast.success('Recording started');
-    } catch (recordError) {
-      const message = recordError instanceof Error ? recordError.message : 'Recording could not start.';
-      setError(message);
-      toast.error(message);
+    if (countdown.isCountingDown) {
+      countdown.cancelCountdown();
+      return;
     }
-  }, [addRecording, recorder, startCamera]);
+    if (countdownEnabled) {
+      countdown.startCountdown(() => { void beginRecording(); });
+    } else {
+      await beginRecording();
+    }
+  }, [addRecording, beginRecording, countdown, countdownEnabled, recorder]);
 
   const handleShareRecording = useCallback(async (recording: Recording) => {
     const shared = await shareRecording(recording);
