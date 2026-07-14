@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { Camera, Download, FolderOpen, Mic, Pause, Play, RefreshCw, Square, Video } from 'lucide-react';
+import { Camera, Download, FlipHorizontal, FolderOpen, Mic, Pause, Play, RefreshCw, Square, Timer, Video } from 'lucide-react';
 import { toast } from 'sonner';
+import { AudioLevelMeter } from '@/components/AudioLevelMeter';
+import { CountdownOverlay } from '@/components/CountdownOverlay';
 import { RecordingsGallery } from '@/components/RecordingsGallery';
 import { TeleprompterEditor } from '@/components/TeleprompterEditor';
 import { TeleprompterOverlay } from '@/components/TeleprompterOverlay';
 import { VideoPlayerModal } from '@/components/VideoPlayerModal';
+import { useCountdown } from '@/hooks/useCountdown';
 import { useRecorder } from '@/hooks/useRecorder';
 import { useRecordings } from '@/hooks/useRecordings';
 import { useTeleprompter } from '@/hooks/useTeleprompter';
