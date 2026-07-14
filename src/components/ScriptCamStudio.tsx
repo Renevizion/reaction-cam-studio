@@ -321,6 +321,7 @@ export default function ScriptCamStudio() {
             <p className="mt-1 max-w-[70vw] truncate text-xs text-muted-foreground">{cameraMeta}</p>
           </div>
           <div className="flex items-center gap-2">
+            <AudioLevelMeter stream={stream} isRecording={isCameraActive} />
             <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ${recorder.isRecording ? 'bg-destructive text-destructive-foreground' : 'bg-secondary text-secondary-foreground'}`}>
               {cameraStatus}
             </span>
@@ -334,6 +335,8 @@ export default function ScriptCamStudio() {
           </div>
         </div>
       </header>
+
+      <CountdownOverlay count={countdown.count} />
 
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 p-3" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.75rem)' }}>
         <div className="pointer-events-auto mx-auto max-w-6xl rounded-md border border-border bg-background/85 p-3 shadow-2xl backdrop-blur-xl">
