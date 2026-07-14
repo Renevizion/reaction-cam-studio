@@ -388,6 +388,26 @@ export default function ScriptCamStudio() {
             </button>
 
             <button
+              onClick={handleFlipCamera}
+              disabled={recorder.isRecording || isStartingCamera || !isCameraActive}
+              title="Flip camera (front/back)"
+              className="inline-flex h-11 items-center gap-2 rounded-md border border-border bg-card px-4 text-sm font-semibold transition hover:bg-accent hover:text-accent-foreground disabled:opacity-40"
+            >
+              <FlipHorizontal className="h-4 w-4" />
+              Flip
+            </button>
+
+            <button
+              onClick={() => setCountdownEnabled((v) => !v)}
+              title="Toggle 3-2-1 countdown before recording"
+              aria-pressed={countdownEnabled}
+              className={`inline-flex h-11 items-center gap-2 rounded-md border px-4 text-sm font-semibold transition ${countdownEnabled ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-card hover:bg-accent hover:text-accent-foreground'}`}
+            >
+              <Timer className="h-4 w-4" />
+              3·2·1
+            </button>
+
+            <button
               onClick={handleRecord}
               disabled={isStartingCamera}
               className={`inline-flex h-12 min-w-[8.75rem] items-center justify-center gap-2 rounded-md px-5 text-sm font-bold transition disabled:opacity-50 ${recorder.isRecording ? 'bg-destructive text-destructive-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
