@@ -413,7 +413,7 @@ export default function ScriptCamStudio() {
               className={`inline-flex h-12 min-w-[8.75rem] items-center justify-center gap-2 rounded-md px-5 text-sm font-bold transition disabled:opacity-50 ${recorder.isRecording ? 'bg-destructive text-destructive-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
             >
               {recorder.isRecording ? <Square className="h-4 w-4 fill-current" /> : <Video className="h-4 w-4" />}
-              {recorder.isRecording ? 'Stop' : 'Record'}
+              {recorder.isRecording ? 'Stop' : countdown.isCountingDown ? `In ${countdown.count ?? ''}…` : 'Record'}
             </button>
 
             <button
