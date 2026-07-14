@@ -49,9 +49,13 @@ export default function ScriptCamStudio() {
   const [selectedMicId, setSelectedMicId] = useState(() => localStorage.getItem(MIC_DEVICE_KEY) || '');
   const [activeCameraLabel, setActiveCameraLabel] = useState('');
   const [activeMicLabel, setActiveMicLabel] = useState('');
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [countdownEnabled, setCountdownEnabled] = useState(true);
   const [isTeleprompterOpen, setIsTeleprompterOpen] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
+
+  const countdown = useCountdown(3);
 
   const teleprompter = useTeleprompter();
   const recorder = useRecorder();
